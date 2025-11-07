@@ -22,12 +22,14 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      // تم تغيير المسار هنا ليعمل مع الهيكل العام (client/src)
       "@": path.resolve(import.meta.dirname, "client", "src"),
       "@shared": path.resolve(import.meta.dirname, "shared"),
       "@assets": path.resolve(import.meta.dirname, "attached_assets"),
     },
   },
-  root: path.resolve(import.meta.dirname, "client"),
+  // تم حذف 'client' هنا ليصبح الجذر هو جذر المشروع (حيث يوجد index.html)
+  root: path.resolve(import.meta.dirname), 
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,

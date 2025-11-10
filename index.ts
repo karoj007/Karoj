@@ -112,8 +112,40 @@ app.use((req, res, next) => {
     // Other ports are firewalled. Default to 5000 if not specified.
     // this serves both the API and the client.
     // It is the only port that is not firewalled.
-    const port = parseInt(process.env.PORT || '5000', 10);
+    const port = parseInt(process.env.PORT || "5000", 10);
     
     server.listen({
       port,
-      host: "0.
+      host: "0.0.0.0",
+      reusePort: true,
+    }, () => {
+      console.log(`✅ Server successfully started on port ${port}`);
+      log(`serving on port ${port}`);
+    });
+
+    // Handle server errors
+    server.on("error", (error: any) => {
+      console.error("❌ Server error:", error);
+      if (error.code === "EADDRINUSE") {
+        console.error(`Port ${port} is already in use`);
+      }
+      process.exit(1);
+    });
+
+  } catch (error) {
+    console.error("❌ Fatal error during server startup:", error);
+    process.exit(1);
+  }
+})();
+
+// Handle unhandled promise rejections
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
+  process.exit(1);
+});
+
+// Handle uncaught exceptions
+process.on("uncaughtException", (error) => {
+  console.error("❌ Uncaught Exception:", error);
+  process.exit(1);
+});

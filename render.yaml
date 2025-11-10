@@ -1,0 +1,30 @@
+services:
+  # Main Web Service
+  - type: web
+    name: lab-management-system
+    runtime: node
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+    healthCheckPath: /api/session
+    autoDeploy: true
+
+# Database (PostgreSQL)
+databases:
+  - name: lab-management-db
+    databaseName: labmanagement
+    user: labadmin
+    region: oregon
+    plan: free
+    ipAllowList: []

@@ -112,30 +112,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ success: true });
   });
 
-  app.post("/api/tests/add-urine-test", requireAuth, async (req, res) => {
+  app.post("/api/tests/add-urine-test", requireAuth, async (_req, res) => {
     try {
       const allTests = await storage.getAllTests();
-      const urineExists = allTests.find(t => t.testType === "urine" || t.name === "Urine");
-      
-      if (urineExists) {
-        return res.status(400).json({ 
-          error: "Urine test already exists", 
-          message: "Urine Analysis test already exists in database" 
-        });
-      }
-
-      const urineTest = await storage.createTest({
+      const urinePayload = {
         name: "Urine",
         unit: "",
         normalRange: "",
         price: 4,
-        testType: "urine"
-      });
+        testType: "urine" as const,
+      };
 
-      res.json({ 
-        success: true, 
+      const existing = allTests.find(
+        (t) => t.testType === "urine" || t.name.toLowerCase() === "urine"
+      );
+
+      if (existing) {
+        const updated = await storage.updateTest(existing.id, urinePayload);
+        return res.json({
+          success: true,
+          message: "Urine Analysis test refreshed successfully",
+          test: updated ?? existing,
+        });
+      }
+
+      const urineTest = await storage.createTest(urinePayload);
+
+      res.json({
+        success: true,
         message: "Urine Analysis test added successfully",
-        test: urineTest
+        test: urineTest,
       });
     } catch (error) {
       console.error("Error adding urine test:", error);
@@ -143,15 +149,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/tests/initialize-defaults", requireAuth, async (req, res) => {
+  app.post("/api/tests/initialize-defaults", requireAuth, async (_req, res) => {
     try {
       const existingTests = await storage.getAllTests();
-      if (existingTests.length > 0) {
-        return res.status(400).json({ 
-          error: "Tests already exist", 
-          message: "Cannot initialize default tests when tests already exist in database" 
-        });
-      }
+      const existingMap = new Map(
+        existingTests.map((test) => [test.name.trim().toLowerCase(), test])
+      );
 
       const defaultTests = [
         { name: "CBC Blood Count", unit: "cells/μL", normalRange: "4500-11000", price: 8 },
@@ -224,25 +227,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ];
 
       const createdTests = [];
+      const updatedTests = [];
+
       for (const test of defaultTests) {
-        const created = await storage.createTest({ ...test, testType: "standard" });
-        createdTests.push(created);
+        const key = test.name.trim().toLowerCase();
+        const payload = { ...test, testType: "standard" as const };
+
+        if (existingMap.has(key)) {
+          const existing = existingMap.get(key)!;
+          const updated = await storage.updateTest(existing.id, payload);
+          updatedTests.push(updated ?? existing);
+        } else {
+          const created = await storage.createTest(payload);
+          createdTests.push(created);
+          existingMap.set(key, created);
+        }
       }
 
       // Add special Urine Analysis test
-      const urineTest = await storage.createTest({
+      const urineKey = "urine";
+      const urinePayload = {
         name: "Urine",
         unit: "",
         normalRange: "",
         price: 4,
-        testType: "urine"
-      });
-      createdTests.push(urineTest);
+        testType: "urine" as const,
+      };
 
-      res.json({ 
-        success: true, 
-        message: `Successfully initialized ${createdTests.length} default tests`,
-        count: createdTests.length 
+      if (existingMap.has(urineKey)) {
+        const existing = existingMap.get(urineKey)!;
+        const updated = await storage.updateTest(existing.id, urinePayload);
+        updatedTests.push(updated ?? existing);
+      } else {
+        const urineTest = await storage.createTest(urinePayload);
+        createdTests.push(urineTest);
+        existingMap.set(urineKey, urineTest);
+      }
+
+      res.json({
+        success: true,
+        message: `Default tests processed: ${createdTests.length} added, ${updatedTests.length} refreshed`,
+        created: createdTests.length,
+        updated: updatedTests.length,
       });
     } catch (error) {
       console.error("Error initializing default tests:", error);

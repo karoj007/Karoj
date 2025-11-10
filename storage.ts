@@ -750,22 +750,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   async setSetting(insertSetting: InsertSetting): Promise<Setting> {
-    const existing = await this.getSettingByKey(insertSetting.key);
-    
-    if (existing) {
-      const [updated] = await db.update(settings)
-        .set({ value: insertSetting.value })
-        .where(eq(settings.key, insertSetting.key))
-        .returning();
-      return updated;
-    }
-    
     const id = randomUUID();
-    const [created] = await db.insert(settings).values({
-      id,
-      ...insertSetting,
-    }).returning();
-    return created;
+    const [result] = await db.insert(settings)
+      .values({
+        id,
+        ...insertSetting,
+      })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: {
+          value: insertSetting.value,
+        },
+      })
+      .returning();
+    return result;
   }
 
   // Dashboard Layouts

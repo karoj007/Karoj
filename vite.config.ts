@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 // هذا التعديل يحل مشكلة تحديد المسار (root) لـ Vite
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";

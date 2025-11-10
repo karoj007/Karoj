@@ -11,6 +11,9 @@ import {
   insertSettingSchema,
   insertDashboardLayoutSchema,
   loginSchema,
+  type InsertTest,
+  type Test,
+  type TestResult,
 } from "@shared/schema";
 
 declare module "express-session" {
@@ -156,7 +159,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         existingTests.map((test) => [test.name.trim().toLowerCase(), test])
       );
 
-      const defaultTests = [
+        const defaultTests: Array<Omit<InsertTest, "testType">> = [
         { name: "CBC Blood Count", unit: "cells/μL", normalRange: "4500-11000", price: 8 },
         { name: "Glucose (Fasting)", unit: "mg/dL", normalRange: "70-100", price: 3 },
         { name: "BUN", unit: "mg/dL", normalRange: "7-20", price: 4 },
@@ -226,8 +229,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { name: "PT Serum", unit: "", normalRange: "Positive/Negative", price: 5 }
       ];
 
-      const createdTests = [];
-      const updatedTests = [];
+        const createdTests: Test[] = [];
+        const updatedTests: Test[] = [];
 
       for (const test of defaultTests) {
         const key = test.name.trim().toLowerCase();
@@ -413,7 +416,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         data: insertTestResultSchema.partial()
       })).parse(req.body);
 
-      const updatedResults = [];
+        const updatedResults: TestResult[] = [];
       const testUpdates = new Map<string, { unit?: string; normalRange?: string }>();
 
       // Process all test result updates

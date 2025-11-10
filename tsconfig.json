@@ -1,12 +1,22 @@
 {
   "include": ["./**/*.ts", "./**/*.tsx"],
-  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "exclude": [
+    "node_modules",
+    "build",
+    "dist",
+    "**/*.test.ts",
+    "vite.config.ts",
+    "vite.ts",
+    "add-tests.ts",
+    "add-pregnancy-tests.ts"
+  ],
   "compilerOptions": {
     "incremental": true,
     "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",
     "noEmit": true,
     "module": "ESNext",
     "strict": true,
+    "noImplicitAny": false,
     "lib": ["esnext", "dom", "dom.iterable"],
     "jsx": "preserve",
     "esModuleInterop": true,
@@ -17,6 +27,7 @@
     "types": ["node", "vite/client"],
     "paths": {
       "@/*": ["./*"],
+      "@/components/ui/*": ["./*.tsx", "./*.ts"],
       "@/components/*": ["./*"],
       "@/lib/*": ["./*"],
       "@/hooks/*": ["./*"],

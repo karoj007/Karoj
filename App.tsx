@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Tests from "@/pages/Tests";
@@ -13,6 +14,7 @@ import Results from "@/pages/Results";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
+import { useLocation } from "wouter";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -58,29 +60,41 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 }
 
 function Router() {
+  const [location] = useLocation();
+  
   return (
-    <Switch>
-      <Route path="/login" component={Login} />
-      <Route path="/">
-        {() => <ProtectedRoute component={Dashboard} />}
-      </Route>
-      <Route path="/tests">
-        {() => <ProtectedRoute component={Tests} />}
-      </Route>
-      <Route path="/patients">
-        {() => <ProtectedRoute component={Patients} />}
-      </Route>
-      <Route path="/results">
-        {() => <ProtectedRoute component={Results} />}
-      </Route>
-      <Route path="/reports">
-        {() => <ProtectedRoute component={Reports} />}
-      </Route>
-      <Route path="/settings">
-        {() => <ProtectedRoute component={Settings} />}
-      </Route>
-      <Route component={NotFound} />
-    </Switch>
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={location}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        transition={{ duration: 0.2, ease: "easeInOut" }}
+      >
+        <Switch>
+          <Route path="/login" component={Login} />
+          <Route path="/">
+            {() => <ProtectedRoute component={Dashboard} />}
+          </Route>
+          <Route path="/tests">
+            {() => <ProtectedRoute component={Tests} />}
+          </Route>
+          <Route path="/patients">
+            {() => <ProtectedRoute component={Patients} />}
+          </Route>
+          <Route path="/results">
+            {() => <ProtectedRoute component={Results} />}
+          </Route>
+          <Route path="/reports">
+            {() => <ProtectedRoute component={Reports} />}
+          </Route>
+          <Route path="/settings">
+            {() => <ProtectedRoute component={Settings} />}
+          </Route>
+          <Route component={NotFound} />
+        </Switch>
+      </motion.div>
+    </AnimatePresence>
   );
 }
 

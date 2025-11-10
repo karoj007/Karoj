@@ -148,13 +148,13 @@ export default function Reports() {
       }
 
       toast({
-        title: "تم الحفظ",
-        description: "تم حفظ التقرير المالي بنجاح",
+        title: "Report Saved",
+        description: "Financial report has been saved successfully",
       });
     } catch (error) {
       toast({
-        title: "خطأ",
-        description: "فشل في حفظ التقرير",
+        title: "Error",
+        description: "Failed to save report",
         variant: "destructive",
       });
     }
@@ -207,7 +207,6 @@ export default function Reports() {
               padding: 30px;
               color: #1f2937;
               background: #ffffff;
-              direction: rtl;
             }
             .report-container {
               max-width: 900px;
@@ -401,7 +400,7 @@ export default function Reports() {
         <body>
           <div class="report-container">
             <div style="text-align: center; margin-bottom: 30px;">
-              <span class="date-badge">📅 ${new Date(selectedDate).toLocaleDateString('ar-EG', { 
+              <span class="date-badge">📅 ${new Date(selectedDate).toLocaleDateString('en-US', { 
                 year: 'numeric', 
                 month: 'long', 
                 day: 'numeric' 
@@ -409,21 +408,21 @@ export default function Reports() {
             </div>
 
             <div class="section">
-              <h2 class="section-title">دخول المرضى</h2>
+              <h2 class="section-title">Patient Income</h2>
               ${groupedReports.map(report => `
                 <div class="table-row">
                   <span class="row-label">${escapeHtml(report.source)}</span>
-                  <span class="row-count">${report.patients} مريض</span>
+                  <span class="row-count">${report.patients} patient(s)</span>
                   <span class="row-value">${report.totalAmount.toFixed(0)}</span>
                 </div>
               `).join('')}
               ${groupedReports.length === 0 ? `
                 <div style="text-align: center; color: #9ca3af; padding: 30px;">
-                  لا توجد بيانات مرضى لهذا التاريخ
+                  No patient data available for this date
                 </div>
               ` : `
                 <div class="table-row total-row">
-                  <span class="row-label">المجموع الكلي</span>
+                  <span class="row-label">Total Income</span>
                   <span class="row-value">${totalIncome.toFixed(0)}</span>
                 </div>
               `}
@@ -431,7 +430,7 @@ export default function Reports() {
 
             ${expenses.filter(e => e.name && e.amount).length > 0 ? `
               <div class="section">
-                <h2 class="section-title">المصاريف</h2>
+                <h2 class="section-title">Expenses</h2>
                 ${expenses.filter(e => e.name && e.amount).map(expense => `
                   <div class="table-row expense-row">
                     <span class="row-label">${escapeHtml(expense.name)}</span>
@@ -439,7 +438,7 @@ export default function Reports() {
                   </div>
                 `).join('')}
                 <div class="table-row total-row">
-                  <span class="row-label">مجموع المصاريف</span>
+                  <span class="row-label">Total Expenses</span>
                   <span class="row-value">-${totalExpenses.toFixed(0)}</span>
                 </div>
               </div>
@@ -447,10 +446,10 @@ export default function Reports() {
 
             ${optionalRows.filter(r => r.name || r.value).length > 0 ? `
               <div class="section optional-section">
-                <h2 class="section-title">معلومات اختيارية</h2>
+                <h2 class="section-title">Optional Information</h2>
                 ${optionalRows.filter(r => r.name || r.value).map(row => `
                   <div class="table-row optional-row">
-                    <span class="row-label">${escapeHtml(row.name || 'ملاحظة')}</span>
+                    <span class="row-label">${escapeHtml(row.name || 'Note')}</span>
                     <span class="row-value">${escapeHtml(row.value)}</span>
                   </div>
                 `).join('')}
@@ -459,20 +458,20 @@ export default function Reports() {
 
             <div class="section">
               <div class="table-row net-total">
-                <span class="row-label">💰 المجموع النهائي (بعد الخصم)</span>
+                <span class="row-label">💰 Net Total (After Deductions)</span>
                 <span class="row-value">${netIncome.toFixed(0)}</span>
               </div>
             </div>
 
             <div class="footer">
-              <p>تم إنشاء التقرير في: ${new Date().toLocaleString('ar-EG', { 
+              <p>Report generated on: ${new Date().toLocaleString('en-US', { 
                 year: 'numeric', 
                 month: 'long', 
                 day: 'numeric', 
                 hour: '2-digit', 
                 minute: '2-digit' 
               })}</p>
-              <p style="margin-top: 8px; font-weight: 600;">هذا تقرير رسمي - يرجى الاحتفاظ به للسجلات</p>
+              <p style="margin-top: 8px; font-weight: 600;">This is an official report - please keep for records</p>
             </div>
           </div>
         </body>
@@ -489,8 +488,8 @@ export default function Reports() {
 
   const exportPDF = () => {
     toast({
-      title: "تصدير PDF",
-      description: "اختر 'حفظ بصيغة PDF' من نافذة الطباعة",
+      title: "Export PDF",
+      description: "Please select 'Save as PDF' from the print dialog",
     });
     
     setTimeout(() => {
@@ -514,21 +513,21 @@ export default function Reports() {
           </Button>
         </div>
         <PageHeader
-          title="📊 التقارير المالية"
-          description="عرض الدخل والمصاريف والتحليلات المالية"
+          title="📊 Financial Reports"
+          description="View income, expenses, and financial analytics"
           actions={
             <>
               <Button variant="outline" onClick={printReport} className="gap-2" data-testid="button-print-report">
                 <Printer className="h-4 w-4" />
-                طباعة
+                Print
               </Button>
               <Button variant="outline" onClick={exportPDF} className="gap-2" data-testid="button-export-report-pdf">
                 <FileDown className="h-4 w-4" />
-                PDF حفظ
+                Save PDF
               </Button>
               <Button onClick={saveReport} className="gap-2" data-testid="button-save-report">
                 <Save className="h-4 w-4" />
-                حفظ
+                Save
               </Button>
             </>
           }
@@ -540,7 +539,7 @@ export default function Reports() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <CardTitle className="flex items-center gap-2">
                   <Calendar className="h-5 w-5 text-primary" />
-                  تاريخ التقرير
+                  Report Date
                 </CardTitle>
                 <div className="w-full sm:w-64">
                   <Input
@@ -558,7 +557,7 @@ export default function Reports() {
           <Card className="border-none shadow-lg bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-950/20 dark:to-green-950/20">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
-                💵 دخول المرضى
+                💵 Patient Income
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -575,7 +574,7 @@ export default function Reports() {
                       </p>
                       <p className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1 mt-1">
                         <span className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full text-xs font-semibold">
-                          {report.patients} مريض
+                          {report.patients} patient(s)
                         </span>
                       </p>
                     </div>
@@ -588,12 +587,12 @@ export default function Reports() {
                 ))}
                 {groupedReports.length === 0 && (
                   <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-                    <p className="text-lg">📭 لا توجد زيارات مسجلة لهذا التاريخ</p>
+                    <p className="text-lg">📭 No visits recorded for this date</p>
                   </div>
                 )}
                 {groupedReports.length > 0 && (
                   <div className="flex items-center justify-between p-5 bg-gradient-to-r from-emerald-500 to-green-500 dark:from-emerald-600 dark:to-green-600 rounded-xl shadow-lg mt-4">
-                    <p className="text-xl font-bold text-white">المجموع الكلي</p>
+                    <p className="text-xl font-bold text-white">Total Income</p>
                     <p className="text-3xl font-bold font-mono text-white">
                       {totalIncome.toFixed(0)}
                     </p>
@@ -607,7 +606,7 @@ export default function Reports() {
             <CardHeader>
               <div className="flex items-center justify-between gap-4">
                 <CardTitle className="flex items-center gap-2 text-red-700 dark:text-red-400">
-                  💸 المصاريف
+                  💸 Expenses
                 </CardTitle>
                 <Button 
                   onClick={addExpense} 
@@ -617,7 +616,7 @@ export default function Reports() {
                   data-testid="button-add-expense"
                 >
                   <Plus className="h-4 w-4" />
-                  إضافة مصروف
+                  Add Expense
                 </Button>
               </div>
             </CardHeader>
@@ -629,7 +628,7 @@ export default function Reports() {
                   data-testid={`expense-row-${index}`}
                 >
                   <Input
-                    placeholder="اسم المصروف (مثال: تكسي، أكل، مصروف)"
+                    placeholder="Expense name (e.g., Taxi, Food, Expense)"
                     value={expense.name}
                     onChange={(e) => updateExpense(expense.id, "name", e.target.value)}
                     className="flex-1 border-gray-300 dark:border-gray-600"
@@ -637,7 +636,7 @@ export default function Reports() {
                   />
                   <Input
                     type="number"
-                    placeholder="المبلغ"
+                    placeholder="Amount"
                     value={expense.amount}
                     onChange={(e) => updateExpense(expense.id, "amount", e.target.value)}
                     className="w-32 border-gray-300 dark:border-gray-600 font-mono"
@@ -656,7 +655,7 @@ export default function Reports() {
               ))}
               {expenses.length > 0 && (
                 <div className="flex items-center justify-between p-5 bg-gradient-to-r from-red-500 to-orange-500 dark:from-red-600 dark:to-orange-600 rounded-xl shadow-lg mt-4">
-                  <p className="text-lg font-bold text-white">مجموع المصاريف</p>
+                  <p className="text-lg font-bold text-white">Total Expenses</p>
                   <p className="text-2xl font-bold font-mono text-white">
                     -{totalExpenses.toFixed(0)}
                   </p>
@@ -669,9 +668,9 @@ export default function Reports() {
             <CardHeader>
               <div className="flex items-center justify-between gap-4">
                 <CardTitle className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
-                  📝 معلومات اختيارية
+                  📝 Optional Information
                   <span className="text-xs font-normal text-amber-600 dark:text-amber-500 bg-amber-100 dark:bg-amber-900 px-2 py-1 rounded">
-                    لا تؤثر على الحسابات
+                    Does not affect calculations
                   </span>
                 </CardTitle>
                 <Button 
@@ -682,7 +681,7 @@ export default function Reports() {
                   data-testid="button-add-optional"
                 >
                   <Plus className="h-4 w-4" />
-                  إضافة معلومة
+                  Add Information
                 </Button>
               </div>
             </CardHeader>
@@ -694,14 +693,14 @@ export default function Reports() {
                   data-testid={`optional-row-${index}`}
                 >
                   <Input
-                    placeholder="اسم المعلومة (مثال: ملاحظة، تنبيه)"
+                    placeholder="Information name (e.g., Note, Alert)"
                     value={row.name}
                     onChange={(e) => updateOptionalRow(row.id, "name", e.target.value)}
                     className="flex-1 bg-white dark:bg-gray-800 border-amber-300 dark:border-amber-700"
                     data-testid={`input-optional-name-${index}`}
                   />
                   <Input
-                    placeholder="القيمة"
+                    placeholder="Value"
                     value={row.value}
                     onChange={(e) => updateOptionalRow(row.id, "value", e.target.value)}
                     className="w-32 bg-white dark:bg-gray-800 border-amber-300 dark:border-amber-700"
@@ -720,7 +719,7 @@ export default function Reports() {
               ))}
               {optionalRows.length === 0 && (
                 <div className="text-center py-8 text-amber-700 dark:text-amber-400">
-                  <p className="text-sm">اضغط على "إضافة معلومة" لإدخال معلومات إضافية</p>
+                  <p className="text-sm">Click "Add Information" to enter additional information</p>
                 </div>
               )}
             </CardContent>
@@ -731,9 +730,9 @@ export default function Reports() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xl font-bold text-white mb-1 flex items-center gap-2">
-                    💰 المجموع النهائي
+                    💰 Net Total
                   </p>
-                  <p className="text-sm text-blue-100">بعد خصم المصاريف</p>
+                  <p className="text-sm text-blue-100">After deducting expenses</p>
                 </div>
                 <div className="text-right">
                   <p className="text-5xl font-bold font-mono text-white drop-shadow-lg" data-testid="text-net-income">
@@ -749,8 +748,8 @@ export default function Reports() {
       <ConfirmDialog
         open={deleteDialog.open}
         onOpenChange={(open) => setDeleteDialog({ open, id: "" })}
-        title="حذف المصروف"
-        description="هل أنت متأكد من حذف هذا المصروف؟"
+        title="Delete Expense"
+        description="Are you sure you want to delete this expense?"
         onConfirm={() => deleteExpense(deleteDialog.id)}
         variant="destructive"
       />

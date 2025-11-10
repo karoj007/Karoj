@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Save, Printer, FileDown, Search, Calendar, ArrowLeft, Settings, Trash2, Plus, X } from "lucide-react";
+import { Save, Printer, FileDown, Search, Calendar, ArrowLeft, Settings, Trash2, Plus, X, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -57,6 +57,12 @@ export default function Results() {
   const { data: visits } = useQuery<Visit[]>({
     queryKey: ["/api/visits", { date: selectedDate }],
     queryFn: () => fetch(`/api/visits?date=${selectedDate}`).then((res) => res.json()),
+  });
+
+  const { data: allVisits } = useQuery<Visit[]>({
+    queryKey: ["/api/visits"],
+    queryFn: () => fetch(`/api/visits`).then((res) => res.json()),
+    enabled: !!searchQuery && searchQuery.length > 0,
   });
 
   const { data: testResults } = useQuery<TestResult[]>({
@@ -824,9 +830,23 @@ export default function Results() {
     }, 500);
   };
 
-  const filteredVisits = visits?.filter((v) =>
-    v.patientName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredVisits = searchQuery.length > 0 
+    ? (allVisits || []).filter((v) =>
+        v.patientName.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : (visits || []).filter((v) =>
+        v.patientName.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+  // When a visit is selected, update the date filter to that visit's date
+  useEffect(() => {
+    if (selectedVisit && filteredVisits) {
+      const selectedVisitData = filteredVisits.find(v => v.id === selectedVisit);
+      if (selectedVisitData && selectedVisitData.visitDate !== selectedDate) {
+        setSelectedDate(selectedVisitData.visitDate);
+      }
+    }
+  }, [selectedVisit]);
 
   return (
     <div className="min-h-screen bg-background p-4 sm:p-6 lg:p-8">
@@ -871,20 +891,25 @@ export default function Results() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="search">Search Patient</Label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="search"
-                      placeholder="Type patient name..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-9"
-                      data-testid="input-search-patient"
-                    />
-                  </div>
+              <div className="space-y-2">
+                <Label htmlFor="search">Search Patient</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="search"
+                    placeholder="Type patient name to see all visits..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9"
+                    data-testid="input-search-patient"
+                  />
                 </div>
+                {searchQuery.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Showing all visits for patients matching "{searchQuery}". Select a visit to view results from that date.
+                  </p>
+                )}
+              </div>
                 <div className="space-y-2">
                   <Label htmlFor="date">Visit Date</Label>
                   <div className="relative">

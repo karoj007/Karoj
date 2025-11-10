@@ -6,8 +6,23 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 
 const serverDir = fileURLToPath(new URL(".", import.meta.url));
-const dataDir = path.resolve(serverDir, "../data");
-const dbPath = path.resolve(dataDir, "lab.db");
+const defaultDataDir = path.resolve(serverDir, "../data");
+
+const customDatabasePath = process.env.DATABASE_PATH
+  ? path.resolve(process.env.DATABASE_PATH)
+  : undefined;
+
+const dataDir = customDatabasePath
+  ? path.dirname(customDatabasePath)
+  : process.env.DATA_DIRECTORY
+  ? path.resolve(process.env.DATA_DIRECTORY)
+  : defaultDataDir;
+
+const dbFilename = customDatabasePath
+  ? path.basename(customDatabasePath)
+  : process.env.DATABASE_FILENAME || "lab.db";
+
+const dbPath = customDatabasePath ?? path.resolve(dataDir, dbFilename);
 
 fs.mkdirSync(dataDir, { recursive: true });
 

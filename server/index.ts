@@ -5,12 +5,16 @@ import { setupVite, serveStatic, log } from "./vite";
 import { testDatabaseConnection, initializeDatabase } from "./db";
 
 const app = express();
+const isProduction = process.env.NODE_ENV === "production";
 
-declare module 'http' {
+declare module "http" {
   interface IncomingMessage {
-    rawBody: unknown
+    rawBody: unknown;
   }
 }
+
+// Configure trust proxy so secure cookies work behind Render/other proxies
+app.set("trust proxy", 1);
 
 // Verify required environment variables
 if (!process.env.SESSION_SECRET) {
@@ -18,17 +22,19 @@ if (!process.env.SESSION_SECRET) {
 }
 
 // Session configuration
-app.use(session({
-  secret: process.env.SESSION_SECRET || "lab-management-secret-key",
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: false, // Disable secure flag to work with Replit's proxy setup
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: "lax", // Allow cookies in same-site requests
-  }
-}));
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "lab-management-secret-key",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: isProduction,
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      sameSite: "lax",
+    },
+  }),
+);
 
 app.use(express.json({
   verify: (req, _res, buf) => {

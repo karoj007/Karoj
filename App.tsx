@@ -1,19 +1,19 @@
 import { Switch, Route, Redirect } from "wouter";
-import { queryClient } from "./lib/queryClient";
+import { queryClient } from "./queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/toaster";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { ThemeProvider } from "@/components/ThemeProvider";
+import { Toaster } from "./toaster";
+import { TooltipProvider } from "./tooltip";
+import { ThemeProvider } from "./ThemeProvider";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import Login from "@/pages/Login";
-import Dashboard from "@/pages/Dashboard";
-import Tests from "@/pages/Tests";
-import Patients from "@/pages/Patients";
-import Results from "@/pages/Results";
-import Reports from "@/pages/Reports";
-import Settings from "@/pages/Settings";
-import NotFound from "@/pages/not-found";
+import Login from "./Login";
+import Dashboard from "./Dashboard";
+import Tests from "./Tests";
+import Patients from "./Patients";
+import Results from "./Results";
+import Reports from "./Reports";
+import Settings from "./Settings";
+import NotFound from "./not-found";
 import { useLocation } from "wouter";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {

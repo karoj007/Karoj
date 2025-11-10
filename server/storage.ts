@@ -23,7 +23,7 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 export interface IStorage {
   // Tests
@@ -368,13 +368,34 @@ export class MemStorage implements IStorage {
 // Database Storage Implementation
 export class DatabaseStorage implements IStorage {
   // Helper function to convert timestamp to ISO string
-  private toISOString(date: Date | null): string {
-    return date ? date.toISOString() : new Date().toISOString();
+  private toISOString(date: Date | number | string | null | undefined): string {
+    if (date instanceof Date) {
+      return date.toISOString();
+    }
+    if (typeof date === "number") {
+      return new Date(date).toISOString();
+    }
+    if (typeof date === "string") {
+      const parsed = Number(date);
+      if (!Number.isNaN(parsed)) {
+        return new Date(parsed).toISOString();
+      }
+      const iso = new Date(date);
+      if (!Number.isNaN(iso.getTime())) {
+        return iso.toISOString();
+      }
+    }
+    return new Date().toISOString();
   }
 
   // Helper function to convert null to undefined for optional fields
-  private nullToUndefined<T>(value: T | null): T | undefined {
-    return value === null ? undefined : value;
+  private nullToUndefined<T>(value: T | null | undefined): T | undefined {
+    return value == null ? undefined : value;
+  }
+
+  private hasChanges(result: unknown): boolean {
+    const changes = (result as { changes?: number }).changes;
+    return typeof changes === "number" ? changes > 0 : false;
   }
 
   // Tests
@@ -447,10 +468,9 @@ export class DatabaseStorage implements IStorage {
       createdAt: this.toISOString(result.createdAt),
     };
   }
-
   async deleteTest(id: string): Promise<boolean> {
     const result = await db.delete(tests).where(eq(tests.id, id));
-    return result.rowCount ? result.rowCount > 0 : false;
+    return this.hasChanges(result);
   }
 
   // Patients
@@ -537,7 +557,7 @@ export class DatabaseStorage implements IStorage {
     
     // Finally, delete the patient
     const result = await db.delete(patients).where(eq(patients.id, id));
-    return result.rowCount ? result.rowCount > 0 : false;
+    return this.hasChanges(result);
   }
 
   // Visits
@@ -600,7 +620,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteVisit(id: string): Promise<boolean> {
     const result = await db.delete(visits).where(eq(visits.id, id));
-    return result.rowCount ? result.rowCount > 0 : false;
+    return this.hasChanges(result);
   }
 
   // Test Results
@@ -690,7 +710,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteTestResult(id: string): Promise<boolean> {
     const result = await db.delete(testResults).where(eq(testResults.id, id));
-    return result.rowCount ? result.rowCount > 0 : false;
+    return this.hasChanges(result);
   }
 
   // Expenses
@@ -736,7 +756,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteExpense(id: string): Promise<boolean> {
     const result = await db.delete(expenses).where(eq(expenses.id, id));
-    return result.rowCount ? result.rowCount > 0 : false;
+    return this.hasChanges(result);
   }
 
   // Settings

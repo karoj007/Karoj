@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { PageHeader } from "@/components/PageHeader";
+import { useState, useEffect, useRef } from "react";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,8 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Save, Trash2, Download, Upload, Moon, Sun, Plus, X, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { useTheme } from "@/components/ThemeProvider";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { useTheme } from "@/components/providers/ThemeProvider";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Setting, CustomPrintSection } from "@shared/schema";
@@ -23,23 +23,49 @@ export default function Settings() {
   const { toast } = useToast();
 
   const [customPrintSections, setCustomPrintSections] = useState<CustomPrintSection[]>([]);
+  const autoSaveTimer = useRef<NodeJS.Timeout | null>(null);
+  const hasMounted = useRef(false);
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const [hasPendingChanges, setHasPendingChanges] = useState(false);
+  const [lastAutoSaveAt, setLastAutoSaveAt] = useState<Date | null>(null);
 
   const { data: settings } = useQuery<Setting[]>({
     queryKey: ["/api/settings"],
   });
 
   useEffect(() => {
-    if (settings) {
-      const customSectionsSetting = settings.find((s) => s.key === "customPrintSections");
-      if (customSectionsSetting) {
-        try {
-          setCustomPrintSections(JSON.parse(customSectionsSetting.value));
-        } catch (e) {
-          setCustomPrintSections([]);
-        }
-      }
+    if (!settings) {
+      return;
     }
+
+    const customSectionsSetting = settings.find((s) => s.key === "customPrintSections");
+    if (customSectionsSetting) {
+      try {
+        setCustomPrintSections(JSON.parse(customSectionsSetting.value));
+      } catch (e) {
+        setCustomPrintSections([]);
+      }
+    } else {
+      setCustomPrintSections([]);
+    }
+
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
+      autoSaveTimer.current = null;
+    }
+
+    setHasPendingChanges(false);
+    setLastAutoSaveAt(null);
+    hasMounted.current = true;
   }, [settings]);
+
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimer.current) {
+        clearTimeout(autoSaveTimer.current);
+      }
+    };
+  }, []);
 
   const setSettingMutation = useMutation({
     mutationFn: (data: { key: string; value: string }) =>
@@ -99,6 +125,74 @@ export default function Settings() {
     },
   });
 
+  const clearAutoSaveTimer = () => {
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
+      autoSaveTimer.current = null;
+    }
+  };
+
+  const saveSettings = async ({ silent = false }: { silent?: boolean } = {}) => {
+    clearAutoSaveTimer();
+    try {
+      await setSettingMutation.mutateAsync({
+        key: "customPrintSections",
+        value: JSON.stringify(customPrintSections),
+      });
+
+      setHasPendingChanges(false);
+      setLastAutoSaveAt(new Date());
+
+      if (!silent) {
+        toast({
+          title: "Settings Saved",
+          description: "Print customization saved successfully",
+        });
+      }
+    } catch (error: any) {
+      if (!silent) {
+        toast({
+          title: "Error",
+          description: error?.message || "Failed to save settings",
+          variant: "destructive",
+        });
+      } else {
+        throw error;
+      }
+    }
+  };
+
+  const performAutoSave = async () => {
+    if (!hasMounted.current || !hasPendingChanges) {
+      return;
+    }
+
+    setIsAutoSaving(true);
+    try {
+      await saveSettings({ silent: true });
+    } catch {
+      toast({
+        title: "Auto-save failed",
+        description: "Unable to save the latest settings automatically.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAutoSaving(false);
+    }
+  };
+
+  const scheduleAutoSave = () => {
+    if (!hasMounted.current) {
+      return;
+    }
+
+    setHasPendingChanges(true);
+    clearAutoSaveTimer();
+    autoSaveTimer.current = setTimeout(() => {
+      performAutoSave();
+    }, 800);
+  };
+
   const addPrintSection = () => {
     const newSection: CustomPrintSection = {
       id: `section-${Date.now()}`,
@@ -109,39 +203,20 @@ export default function Settings() {
       backgroundColor: "#ffffff",
       fontSize: 16,
     };
-    setCustomPrintSections([...customPrintSections, newSection]);
+    setCustomPrintSections((prev) => [...prev, newSection]);
+    scheduleAutoSave();
   };
 
   const updatePrintSection = (id: string, field: keyof CustomPrintSection, value: string | number) => {
-    setCustomPrintSections(
-      customPrintSections.map((section) =>
-        section.id === id ? { ...section, [field]: value } : section
-      )
+    setCustomPrintSections((prev) =>
+      prev.map((section) => (section.id === id ? { ...section, [field]: value } : section))
     );
+    scheduleAutoSave();
   };
 
   const removePrintSection = (id: string) => {
-    setCustomPrintSections(customPrintSections.filter((section) => section.id !== id));
-  };
-
-  const saveSettings = async () => {
-    try {
-      await setSettingMutation.mutateAsync({
-        key: "customPrintSections",
-        value: JSON.stringify(customPrintSections),
-      });
-
-      toast({
-        title: "Settings Saved",
-        description: "Print customization saved successfully",
-      });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to save settings",
-        variant: "destructive",
-      });
-    }
+    setCustomPrintSections((prev) => prev.filter((section) => section.id !== id));
+    scheduleAutoSave();
   };
 
   const deleteAllData = () => {
@@ -163,6 +238,16 @@ export default function Settings() {
     });
   };
 
+  const autoSaveStatus = isAutoSaving
+    ? "Auto-saving..."
+    : setSettingMutation.isPending
+    ? "Saving..."
+    : hasPendingChanges
+    ? "Unsaved changes"
+    : lastAutoSaveAt
+    ? `Saved at ${lastAutoSaveAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+    : "All changes saved";
+
   return (
     <div className="min-h-screen bg-background p-4 sm:p-6 lg:p-8">
       <div className="max-w-5xl mx-auto">
@@ -178,16 +263,24 @@ export default function Settings() {
             Back
           </Button>
         </div>
-        <PageHeader
-          title="Settings"
-          description="Configure system preferences and customize print templates"
-          actions={
-            <Button onClick={saveSettings} className="gap-2" data-testid="button-save-settings">
-              <Save className="h-4 w-4" />
-              Save Settings
-            </Button>
-          }
-        />
+          <PageHeader
+            title="Settings"
+            description="Configure system preferences and customize print templates"
+            actions={
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground">{autoSaveStatus}</span>
+                <Button
+                  onClick={() => saveSettings()}
+                  className="gap-2"
+                  data-testid="button-save-settings"
+                  disabled={isAutoSaving || setSettingMutation.isPending}
+                >
+                  <Save className="h-4 w-4" />
+                  Save Settings
+                </Button>
+              </div>
+            }
+          />
 
         <Tabs defaultValue="general" className="space-y-6">
           <TabsList className="grid w-full grid-cols-3">
@@ -420,10 +513,10 @@ export default function Settings() {
                   <div className="space-y-2">
                     <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Features:</p>
                     <ul className="text-sm text-muted-foreground space-y-1 ml-4">
-                      <li>• Custom interface with 3 sections (Physical, Chemical, Microscopical)</li>
-                      <li>• 18 parameters with default values</li>
-                      <li>• Price: 4</li>
-                      <li>• Perfect for syncing production with development</li>
+                      <li>- Custom interface with 3 sections (Physical, Chemical, Microscopical)</li>
+                      <li>- 18 parameters with default values</li>
+                      <li>- Price: 4</li>
+                      <li>- Perfect for syncing production with development</li>
                     </ul>
                   </div>
                 </div>
@@ -461,10 +554,10 @@ export default function Settings() {
                   <div className="space-y-2">
                     <p className="text-sm font-medium text-primary">Note:</p>
                     <ul className="text-sm text-muted-foreground space-y-1 ml-4">
-                      <li>• Only works if no tests exist in database</li>
-                      <li>• Perfect for first-time setup or after clearing all tests</li>
-                      <li>• All tests come with units, normal ranges, and prices</li>
-                      <li>• Urine test includes 18 parameters with default values</li>
+                      <li>- Only works if no tests exist in database</li>
+                      <li>- Perfect for first-time setup or after clearing all tests</li>
+                      <li>- All tests come with units, normal ranges, and prices</li>
+                      <li>- Urine test includes 18 parameters with default values</li>
                     </ul>
                   </div>
                 </div>
@@ -498,15 +591,15 @@ export default function Settings() {
                   <div className="space-y-2">
                     <p className="text-sm font-medium text-destructive">What will be deleted:</p>
                     <ul className="text-sm text-muted-foreground space-y-1 ml-4">
-                      <li>• All patients</li>
-                      <li>• All visits</li>
-                      <li>• All test results</li>
-                      <li>• All expenses</li>
+                      <li>- All patients</li>
+                      <li>- All visits</li>
+                      <li>- All test results</li>
+                      <li>- All expenses</li>
                     </ul>
                     <p className="text-sm font-medium text-primary mt-2">What will be kept:</p>
                     <ul className="text-sm text-muted-foreground space-y-1 ml-4">
-                      <li>• Tests catalog and prices</li>
-                      <li>• Print customization</li>
+                      <li>- Tests catalog and prices</li>
+                      <li>- Print customization</li>
                     </ul>
                   </div>
                 </div>

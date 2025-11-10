@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
-import { PageHeader } from "@/components/PageHeader";
+import { useState, useEffect, useRef } from "react";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Plus, Save, Trash2, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Test } from "@shared/schema";
@@ -28,6 +28,11 @@ export default function Tests() {
     id: "",
   });
   const { toast } = useToast();
+  const autoSaveTimer = useRef<NodeJS.Timeout | null>(null);
+  const hasMounted = useRef(false);
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const [hasPendingChanges, setHasPendingChanges] = useState(false);
+  const [lastAutoSaveAt, setLastAutoSaveAt] = useState<Date | null>(null);
 
   const { data: testsData, isLoading } = useQuery<Test[]>({
     queryKey: ["/api/tests"],
@@ -68,15 +73,33 @@ export default function Tests() {
           isNew: false,
         }))
       );
+      hasMounted.current = true;
     }
   }, [testsData]);
 
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimer.current) {
+        clearTimeout(autoSaveTimer.current);
+      }
+    };
+  }, []);
+
+  const clearAutoSaveTimer = () => {
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
+      autoSaveTimer.current = null;
+    }
+  };
+
   const addTest = () => {
     setTests([...tests, { id: `new-${Date.now()}`, name: "", unit: "", normalRange: "", price: "", isNew: true }]);
+    scheduleAutoSave();
   };
 
   const updateTest = (id: string, field: keyof TestRow, value: string) => {
     setTests(tests.map((test) => (test.id === id ? { ...test, [field]: value } : test)));
+    scheduleAutoSave();
   };
 
   const deleteTest = async (id: string) => {
@@ -92,9 +115,14 @@ export default function Tests() {
     setDeleteDialog({ open: false, id: "" });
   };
 
-  const saveTests = async () => {
+  const saveTests = async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (!hasMounted.current) {
+      return;
+    }
+    clearAutoSaveTimer();
+
     for (const test of tests) {
-      if (!test.name) continue;
+      if (!test.name.trim()) continue;
 
       const data = {
         name: test.name,
@@ -110,11 +138,52 @@ export default function Tests() {
       }
     }
 
-    toast({
-      title: "Tests Saved",
-      description: "All test information has been saved successfully",
-    });
+    setHasPendingChanges(false);
+    setLastAutoSaveAt(new Date());
+
+    if (!silent) {
+      toast({
+        title: "Tests Saved",
+        description: "All test information has been saved successfully.",
+      });
+    }
   };
+
+  const performAutoSave = async () => {
+    if (!hasMounted.current || !hasPendingChanges) {
+      return;
+    }
+    setIsAutoSaving(true);
+    clearAutoSaveTimer();
+    try {
+      await saveTests({ silent: true });
+    } catch (error) {
+      toast({
+        title: "Auto-save failed",
+        description: "Unable to save the latest changes automatically.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAutoSaving(false);
+    }
+  };
+
+  const scheduleAutoSave = () => {
+    if (!hasMounted.current) return;
+    setHasPendingChanges(true);
+    clearAutoSaveTimer();
+    autoSaveTimer.current = setTimeout(() => {
+      performAutoSave();
+    }, 800);
+  };
+
+  const autoSaveStatus = isAutoSaving
+    ? "Auto-saving..."
+    : hasPendingChanges
+    ? "Unsaved changes"
+    : lastAutoSaveAt
+    ? `Saved at ${lastAutoSaveAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+    : "All changes saved";
 
   if (isLoading) {
     return (
@@ -159,18 +228,19 @@ export default function Tests() {
         <PageHeader
           title="Tests & Prices"
           description="Manage laboratory tests, units, normal ranges, and pricing"
-          actions={
-            <>
-              <Button onClick={addTest} variant="outline" className="gap-2" data-testid="button-add-test">
-                <Plus className="h-4 w-4" />
-                Add Test
-              </Button>
-              <Button onClick={saveTests} className="gap-2" data-testid="button-save-tests">
-                <Save className="h-4 w-4" />
-                Save All
-              </Button>
-            </>
-          }
+            actions={
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">{autoSaveStatus}</span>
+                <Button onClick={addTest} variant="outline" className="gap-2" data-testid="button-add-test">
+                  <Plus className="h-4 w-4" />
+                  Add Test
+                </Button>
+                <Button onClick={() => saveTests()} className="gap-2" data-testid="button-save-tests">
+                  <Save className="h-4 w-4" />
+                  Save All
+                </Button>
+              </div>
+            }
         />
 
         <Card className="overflow-hidden">

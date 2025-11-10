@@ -2,7 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import { testDatabaseConnection } from "./db";
+import { testDatabaseConnection, initializeDatabase } from "./db";
 
 const app = express();
 
@@ -71,10 +71,12 @@ app.use((req, res, next) => {
   try {
     console.log("🚀 Starting server initialization...");
     
+    initializeDatabase();
+    
     // Test database connection before starting server
     const dbConnected = await testDatabaseConnection();
     if (!dbConnected) {
-      throw new Error("Failed to connect to database. Please check your DATABASE_URL and database availability.");
+      throw new Error("Failed to initialize the local database. Please check file permissions and available disk space.");
     }
 
     const server = await registerRoutes(app);

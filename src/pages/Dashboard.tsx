@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
 import { TestTube, Users, FileText, BarChart3, Settings, Moon, Sun, Lock, Unlock, Edit2, Save } from "lucide-react";
-import { useTheme } from "@/components/ThemeProvider";
+import { useTheme } from "@/components/providers/ThemeProvider";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { DashboardLayout } from "@shared/schema";
@@ -263,9 +263,11 @@ export default function Dashboard() {
           <h2 className="text-3xl font-semibold text-foreground mb-2" data-testid="text-dashboard-title">
             Dashboard
           </h2>
-          <p className="text-muted-foreground">
-            {isLocked ? "Select a section to get started" : "Drag to move • Pull corner handle to resize • Click edit button to customize name and color"}
-          </p>
+            <p className="text-muted-foreground">
+              {isLocked
+                ? "Select a section to get started"
+                : "Drag to move | Pull the corner handle to resize | Click the edit button to customize name and color"}
+            </p>
         </div>
 
         <GridLayout

@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { pgTable, text, integer, real, timestamp, json } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 // Tests Schema
 export const testSchema = z.object({
@@ -169,37 +169,43 @@ export const customPrintSectionSchema = z.object({
 export type CustomPrintSection = z.infer<typeof customPrintSectionSchema>;
 
 // Drizzle ORM Table Definitions
-export const tests = pgTable("tests", {
+export const tests = sqliteTable("tests", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   unit: text("unit"),
   normalRange: text("normal_range"),
   price: real("price"),
   testType: text("test_type").default("standard").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(unixepoch() * 1000)`)
+    .notNull(),
 });
 
-export const patients = pgTable("patients", {
+export const patients = sqliteTable("patients", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   age: integer("age"),
   gender: text("gender"),
   phone: text("phone"),
   source: text("source"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(unixepoch() * 1000)`)
+    .notNull(),
 });
 
-export const visits = pgTable("visits", {
+export const visits = sqliteTable("visits", {
   id: text("id").primaryKey(),
   patientId: text("patient_id").notNull(),
   patientName: text("patient_name").notNull(),
   visitDate: text("visit_date").notNull(),
   totalCost: real("total_cost").notNull(),
-  testIds: json("test_ids").$type<string[]>().notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  testIds: text("test_ids", { mode: "json" }).$type<string[]>().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(unixepoch() * 1000)`)
+    .notNull(),
 });
 
-export const testResults = pgTable("test_results", {
+export const testResults = sqliteTable("test_results", {
   id: text("id").primaryKey(),
   visitId: text("visit_id").notNull(),
   testId: text("test_id").notNull(),
@@ -209,25 +215,29 @@ export const testResults = pgTable("test_results", {
   normalRange: text("normal_range"),
   price: real("price"),
   testType: text("test_type").default("standard").notNull(),
-  urineData: json("urine_data").$type<UrineData>(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  urineData: text("urine_data", { mode: "json" }).$type<UrineData | undefined>(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(unixepoch() * 1000)`)
+    .notNull(),
 });
 
-export const expenses = pgTable("expenses", {
+export const expenses = sqliteTable("expenses", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   amount: real("amount").notNull(),
   date: text("date").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(unixepoch() * 1000)`)
+    .notNull(),
 });
 
-export const settings = pgTable("settings", {
+export const settings = sqliteTable("settings", {
   id: text("id").primaryKey(),
   key: text("key").notNull().unique(),
   value: text("value").notNull(),
 });
 
-export const dashboardLayouts = pgTable("dashboard_layouts", {
+export const dashboardLayouts = sqliteTable("dashboard_layouts", {
   id: text("id").primaryKey(),
   sectionName: text("section_name").notNull().unique(),
   displayName: text("display_name").notNull(),

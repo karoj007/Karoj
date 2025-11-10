@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { PageHeader } from "@/components/PageHeader";
+import { useState, useEffect, useRef } from "react";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,6 +53,11 @@ export default function Results() {
     totalCost: 0,
   });
   const { toast } = useToast();
+  const autoSaveTimer = useRef<NodeJS.Timeout | null>(null);
+  const hasMounted = useRef(false);
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const [hasPendingChanges, setHasPendingChanges] = useState(false);
+  const [lastAutoSaveAt, setLastAutoSaveAt] = useState<Date | null>(null);
 
   const { data: visits } = useQuery<Visit[]>({
     queryKey: ["/api/visits", { date: selectedDate }],
@@ -89,8 +94,28 @@ export default function Results() {
   useEffect(() => {
     if (testResults) {
       setResults(testResults);
+      hasMounted.current = true;
+      clearAutoSaveTimer();
+      setHasPendingChanges(false);
+      setIsAutoSaving(false);
+      setLastAutoSaveAt(null);
     }
   }, [testResults]);
+
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimer.current) {
+        clearTimeout(autoSaveTimer.current);
+      }
+    };
+  }, []);
+
+  const clearAutoSaveTimer = () => {
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
+      autoSaveTimer.current = null;
+    }
+  };
 
   const updatePatientMutation = useMutation({
     mutationFn: (data: { id: string; patient: Partial<Patient> }) =>
@@ -162,6 +187,7 @@ export default function Results() {
 
   const updateResult = (id: string, field: keyof TestResult, value: string) => {
     setResults(results.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+    scheduleAutoSave();
   };
 
   const updateUrineData = (id: string, field: string, value: string) => {
@@ -177,6 +203,7 @@ export default function Results() {
       }
       return r;
     }));
+    scheduleAutoSave();
   };
 
   const handleEditPatient = () => {
@@ -284,9 +311,14 @@ export default function Results() {
     });
   };
 
-  const saveResults = async () => {
+  const saveResults = async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (!hasMounted.current || !selectedVisit || results.length === 0) {
+      return;
+    }
+
+    clearAutoSaveTimer();
+
     try {
-      // Prepare all updates
       const updates = results.map((result) => ({
         id: result.id,
         data: {
@@ -298,21 +330,68 @@ export default function Results() {
         },
       }));
 
-      // Send all updates in a single batch request
       await batchUpdateMutation.mutateAsync(updates);
-      
-      toast({
-        title: "Results Saved",
-        description: "Test results have been saved successfully",
-      });
+
+      setHasPendingChanges(false);
+      setLastAutoSaveAt(new Date());
+
+      if (!silent) {
+        toast({
+          title: "Results Saved",
+          description: "Test results have been saved successfully.",
+        });
+      }
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to save results",
-        variant: "destructive",
-      });
+      if (!silent) {
+        toast({
+          title: "Error",
+          description: "Failed to save results",
+          variant: "destructive",
+        });
+      }
+      if (silent) {
+        throw error;
+      }
     }
   };
+
+  const performAutoSave = async () => {
+    if (!hasMounted.current || !hasPendingChanges) {
+      return;
+    }
+    setIsAutoSaving(true);
+    clearAutoSaveTimer();
+    try {
+      await saveResults({ silent: true });
+    } catch (error) {
+      toast({
+        title: "Auto-save failed",
+        description: "Unable to save the latest results automatically.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAutoSaving(false);
+    }
+  };
+
+  const scheduleAutoSave = () => {
+    if (!hasMounted.current) return;
+    setHasPendingChanges(true);
+    clearAutoSaveTimer();
+    autoSaveTimer.current = setTimeout(() => {
+      performAutoSave();
+    }, 800);
+  };
+
+  const autoSaveStatus = selectedVisit
+    ? isAutoSaving
+      ? "Auto-saving..."
+      : hasPendingChanges
+      ? "Unsaved changes"
+      : lastAutoSaveAt
+      ? `Saved at ${lastAutoSaveAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+      : "All changes saved"
+    : "Select a patient to begin";
 
   const escapeHtml = (text: string): string => {
     const div = document.createElement('div');
@@ -846,22 +925,23 @@ export default function Results() {
         <PageHeader
           title="Test Results"
           description="Enter and manage patient test results"
-          actions={
-            <>
-              <Button variant="outline" onClick={printResults} className="gap-2" data-testid="button-print">
-                <Printer className="h-4 w-4" />
-                Print
-              </Button>
-              <Button variant="outline" onClick={exportPDF} className="gap-2" data-testid="button-export-pdf">
-                <FileDown className="h-4 w-4" />
-                Save PDF
-              </Button>
-              <Button onClick={saveResults} className="gap-2" data-testid="button-save-results">
-                <Save className="h-4 w-4" />
-                Save
-              </Button>
-            </>
-          }
+            actions={
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">{autoSaveStatus}</span>
+                <Button variant="outline" onClick={printResults} className="gap-2" data-testid="button-print">
+                  <Printer className="h-4 w-4" />
+                  Print
+                </Button>
+                <Button variant="outline" onClick={exportPDF} className="gap-2" data-testid="button-export-pdf">
+                  <FileDown className="h-4 w-4" />
+                  Save PDF
+                </Button>
+                <Button onClick={() => saveResults()} className="gap-2" data-testid="button-save-results">
+                  <Save className="h-4 w-4" />
+                  Save
+                </Button>
+              </div>
+            }
         />
 
         <div className="space-y-6">

@@ -1,9 +1,10 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import compression from "compression";
+import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import { testDatabaseConnection } from "./db";
+import { testDatabaseConnection, pool } from "./db";
 
 const app = express();
 
@@ -18,13 +19,20 @@ if (!process.env.SESSION_SECRET) {
   console.warn("⚠️  SESSION_SECRET not set, using default (not recommended for production)");
 }
 
+const PgSession = connectPgSimple(session);
+
 // Session configuration
 app.use(session({
+  store: new PgSession({
+    pool,
+    tableName: "user_sessions",
+    createTableIfMissing: true,
+  }),
   secret: process.env.SESSION_SECRET || "lab-management-secret-key",
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false, // Disable secure flag to work with Replit's proxy setup
+    secure: process.env.NODE_ENV === "production",
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     sameSite: "lax", // Allow cookies in same-site requests

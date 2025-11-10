@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
+import compression from "compression";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { testDatabaseConnection } from "./db";
@@ -28,6 +29,17 @@ app.use(session({
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     sameSite: "lax", // Allow cookies in same-site requests
   }
+}));
+
+// Enable gzip compression for faster responses
+app.use(compression({
+  threshold: 1024, // only compress responses > 1kb
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+    return compression.filter(req, res);
+  },
 }));
 
 app.use(express.json({
@@ -104,36 +116,4 @@ app.use((req, res, next) => {
     
     server.listen({
       port,
-      host: "0.0.0.0",
-      reusePort: true,
-    }, () => {
-      console.log(`✅ Server successfully started on port ${port}`);
-      log(`serving on port ${port}`);
-    });
-
-    // Handle server errors
-    server.on('error', (error: any) => {
-      console.error("❌ Server error:", error);
-      if (error.code === 'EADDRINUSE') {
-        console.error(`Port ${port} is already in use`);
-      }
-      process.exit(1);
-    });
-
-  } catch (error) {
-    console.error("❌ Fatal error during server startup:", error);
-    process.exit(1);
-  }
-})();
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:', error);
-  process.exit(1);
-});
+      host: "0.

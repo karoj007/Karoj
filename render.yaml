@@ -1,0 +1,9 @@
+services:
+  - type: static
+    name: lab-management-system
+    env: node
+    buildCommand: npm install && npm run build
+    publishDirectory: dist
+    envVars:
+      - key: NODE_VERSION
+        value: 20

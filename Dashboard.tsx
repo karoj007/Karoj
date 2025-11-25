@@ -21,7 +21,7 @@ const iconMap = {
   results: FileText,
   reports: BarChart3,
   settings: Settings,
-  accounts: ShieldCheck, 
+  accounts: ShieldCheck,
 };
 
 export default function Dashboard() {
@@ -33,7 +33,7 @@ export default function Dashboard() {
   const [localLayouts, setLocalLayouts] = useState<DashboardLayout[]>([]);
   const [currentUser, setCurrentUser] = useState<any>(null);
 
-  // 1. جلب المستخدم
+  // 1. جلب بيانات المستخدم
   useEffect(() => {
     fetch("/api/session").then(res => res.json()).then(data => {
       if (data.authenticated) setCurrentUser(data.user);
@@ -44,24 +44,25 @@ export default function Dashboard() {
     queryKey: ["/api/dashboard-layouts"],
   });
 
-  // 2. دمج زر الحسابات يدوياً إذا لم يكن موجوداً في القاعدة
+  // 2. دمج زر الحسابات يدوياً للأدمن
   useEffect(() => {
     if (layouts) {
+      // ننسخ التخطيط الحالي
       let currentLayouts = [...layouts];
-      // التحقق هل زر الحسابات موجود؟
+      
+      // نتأكد من وجود زر الحسابات، إذا لم يكن موجوداً نضيفه
       const hasAccounts = currentLayouts.find(l => l.sectionName === 'accounts');
       if (!hasAccounts) {
-        // إضافته يدوياً للواجهة فقط
         currentLayouts.push({
-          id: 999,
+          id: 9999, // ID وهمي مؤقت
           sectionName: 'accounts',
-          displayName: 'Accounts',
+          displayName: 'Accounts & Users',
           route: '/accounts',
           icon: 'ShieldCheck',
           color: 'from-red-500/10 to-red-500/5',
-          positionX: 0,
-          positionY: 10, // يظهر في الأسفل
-          width: 4,
+          positionX: 0, 
+          positionY: 10, // في الأسفل
+          width: 4, 
           height: 2,
           isVisible: true
         });
@@ -70,32 +71,40 @@ export default function Dashboard() {
     }
   }, [layouts]);
 
-  // 3. دالة الصلاحيات (الذكية)
+  // 3. دالة فحص الصلاحيات (تم تعديلها لتسمح للمدير بالدخول)
   const shouldShowWidget = (sectionName: string) => {
-    // انتظر تحميل المستخدم
-    if (!currentUser) return false; 
+    // إذا لم يتم تحميل المستخدم بعد، لا تخفِ شيئاً (انتظر)
+    if (!currentUser) return true; 
     
-    // هام جداً: إذا لم يكن هناك حقل صلاحيات (حساب قديم/أدمن)، اظهر كل شيء
+    // هام: إذا كان الحساب لا يملك حقل permissions (مثل حسابك القديم)، اظهر كل شيء
     if (!currentUser.permissions) return true;
 
-    let perms = currentUser.permissions;
-    if (typeof perms === 'string') { try { perms = JSON.parse(perms); } catch (e) {} }
+    // محاولة قراءة الصلاحيات
+    let perms;
+    try {
+      perms = typeof currentUser.permissions === 'string' 
+        ? JSON.parse(currentUser.permissions) 
+        : currentUser.permissions;
+    } catch (e) {
+      return true; // في حال حدوث خطأ، اظهر كل شيء للأمان (للمدير)
+    }
 
-    // إذا كانت الصلاحيات فارغة أو غير صالحة، اعتبره أدمن واعرض كل شيء
-    if (!perms || Object.keys(perms).length === 0) return true;
+    // إذا كانت الصلاحيات فارغة، اظهر كل شيء
+    if (!perms) return true;
 
-    // التحقق للمستخدمين الجدد
+    // فحص الصلاحيات للمستخدمين الجدد فقط
     switch (sectionName) {
-      case 'tests': return perms.tests?.access;
-      case 'patients': return perms.patients?.view;
-      case 'results': return perms.results?.view;
-      case 'reports': return perms.reports?.view;
-      case 'settings': return perms.settings?.access;
-      case 'accounts': return perms.accounts?.access;
+      case 'tests': return perms.tests?.access !== false;
+      case 'patients': return perms.patients?.view !== false;
+      case 'results': return perms.results?.view !== false;
+      case 'reports': return perms.reports?.view !== false;
+      case 'settings': return perms.settings?.access !== false;
+      case 'accounts': return perms.accounts?.access !== false;
       default: return true;
     }
   };
 
+  // تصفية العناصر
   const visibleLayouts = localLayouts.filter(layout => shouldShowWidget(layout.sectionName));
 
   const gridLayout = visibleLayouts.map(layout => ({
@@ -106,7 +115,6 @@ export default function Dashboard() {
     h: layout.height,
   }));
 
-  // (باقي الكود كما هو تماماً)
   const initLayoutsMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/dashboard-layouts/init", {}),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/dashboard-layouts"] }),
@@ -124,7 +132,7 @@ export default function Dashboard() {
   const handleResize = (newLayout: any[]) => { if (isLocked) return; setLocalLayouts(prev => prev.map(layout => { const item = newLayout.find(i => i.i === layout.sectionName); return item ? { ...layout, positionX: item.x, positionY: item.y, width: item.w, height: item.h } : layout; })); };
   const handleResizeStop = (newLayout: any[]) => { if (isLocked) return; newLayout.forEach((item) => { const layout = localLayouts.find(l => l.sectionName === item.i); if (layout) { updateLayoutMutation.mutate({ sectionName: layout.sectionName, data: { ...layout, positionX: item.x, positionY: item.y, width: item.w, height: item.h }, }); } }); };
 
-  if (isLoading || !layouts) return <div className="min-h-screen bg-background flex items-center justify-center">Loading...</div>;
+  if (isLoading) return <div className="min-h-screen bg-background flex items-center justify-center">Loading...</div>;
 
   return (
     <div className="min-h-screen bg-background">

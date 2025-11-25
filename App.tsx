@@ -12,10 +12,15 @@ import Patients from "@/pages/Patients";
 import Results from "@/pages/Results";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
+import Accounts from "@/pages/Accounts"; // الصفحة الجديدة
 import NotFound from "@/pages/not-found";
 
-function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+// تعريف الصلاحيات
+type PermissionSection = 'patients' | 'results' | 'reports' | 'settings' | 'accounts' | 'tests';
+type PermissionAction = 'view' | 'access';
+
+function ProtectedRoute({ component: Component, requiredPerm }: { component: React.ComponentType, requiredPerm?: { section: PermissionSection, action: PermissionAction } }) {
+  const [user, setUser] = useState<any>(null);
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
@@ -23,35 +28,35 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
       try {
         const response = await fetch("/api/session");
         const data = await response.json();
-        setIsAuthenticated(data.authenticated);
-        
-        // Sync with sessionStorage for quick checks
         if (data.authenticated) {
+          setUser(data.user); 
           sessionStorage.setItem("lab-authenticated", "true");
         } else {
+          setUser(null);
           sessionStorage.removeItem("lab-authenticated");
         }
       } catch (error) {
-        setIsAuthenticated(false);
+        setUser(null);
         sessionStorage.removeItem("lab-authenticated");
       } finally {
         setIsChecking(false);
       }
     };
-
     checkSession();
   }, []);
 
-  if (isChecking) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-pulse text-muted-foreground">Loading...</div>
-      </div>
-    );
-  }
+  if (isChecking) return <div className="min-h-screen flex items-center justify-center bg-background"><div className="animate-pulse text-muted-foreground">Loading...</div></div>;
 
-  if (!isAuthenticated) {
-    return <Redirect to="/login" />;
+  if (!user) return <Redirect to="/login" />;
+
+  // فحص الصلاحيات (الشرطي)
+  if (requiredPerm) {
+    let perms = user.permissions;
+    if (typeof perms === 'string') { try { perms = JSON.parse(perms); } catch(e) {} }
+    
+    if (perms && perms[requiredPerm.section] && perms[requiredPerm.section][requiredPerm.action] === false) {
+      return <Redirect to="/" />;
+    }
   }
 
   return <Component />;
@@ -65,19 +70,22 @@ function Router() {
         {() => <ProtectedRoute component={Dashboard} />}
       </Route>
       <Route path="/tests">
-        {() => <ProtectedRoute component={Tests} />}
+        {() => <ProtectedRoute component={Tests} requiredPerm={{ section: 'tests', action: 'access' }} />}
       </Route>
       <Route path="/patients">
-        {() => <ProtectedRoute component={Patients} />}
+        {() => <ProtectedRoute component={Patients} requiredPerm={{ section: 'patients', action: 'view' }} />}
       </Route>
       <Route path="/results">
-        {() => <ProtectedRoute component={Results} />}
+        {() => <ProtectedRoute component={Results} requiredPerm={{ section: 'results', action: 'view' }} />}
       </Route>
       <Route path="/reports">
-        {() => <ProtectedRoute component={Reports} />}
+        {() => <ProtectedRoute component={Reports} requiredPerm={{ section: 'reports', action: 'view' }} />}
       </Route>
       <Route path="/settings">
-        {() => <ProtectedRoute component={Settings} />}
+        {() => <ProtectedRoute component={Settings} requiredPerm={{ section: 'settings', action: 'access' }} />}
+      </Route>
+      <Route path="/accounts">
+        {() => <ProtectedRoute component={Accounts} requiredPerm={{ section: 'accounts', action: 'access' }} />}
       </Route>
       <Route component={NotFound} />
     </Switch>

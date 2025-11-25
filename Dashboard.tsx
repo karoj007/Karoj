@@ -33,10 +33,13 @@ export default function Dashboard() {
   const [localLayouts, setLocalLayouts] = useState<DashboardLayout[]>([]);
   const [currentUser, setCurrentUser] = useState<any>(null);
 
-  // 1. جلب المستخدم (للتأكد من الصلاحيات)
+  // 1. جلب بيانات المستخدم
   useEffect(() => {
     fetch("/api/session").then(res => res.json()).then(data => {
-      if (data.authenticated) setCurrentUser(data.user);
+      if (data.authenticated) {
+        console.log("Logged in user:", data.user.username); // للتأكد من الاسم
+        setCurrentUser(data.user);
+      }
     });
   }, []);
 
@@ -44,48 +47,54 @@ export default function Dashboard() {
     queryKey: ["/api/dashboard-layouts"],
   });
 
-  // 2. كود "الحقن الإجباري" لزر الحسابات
+  // 2. تجهيز الأزرار (مع زر الحسابات)
   useEffect(() => {
     if (layouts) {
-      const currentList = [...layouts];
-      const hasAccounts = currentList.find(l => l.sectionName === 'accounts');
+      let currentLayouts = [...layouts];
       
-      // إذا لم يكن زر الحسابات موجوداً، نقوم بإضافته بالقوة في البداية
+      // التأكد من وجود زر الحسابات
+      const hasAccounts = currentLayouts.find(l => l.sectionName === 'accounts');
       if (!hasAccounts) {
-        currentList.unshift({ // unshift يضعه في البداية
+        currentLayouts.unshift({
           id: 9999,
           sectionName: 'accounts',
-          displayName: 'Accounts (Admin)',
+          displayName: 'Accounts & Users',
           route: '/accounts',
           color: 'from-red-500/10 to-red-500/5',
-          positionX: 0,
-          positionY: 0, // في أعلى الشاشة
-          width: 4,
+          positionX: 0, 
+          positionY: 0,
+          width: 4, 
           height: 2,
           isVisible: true
         });
       }
-      setLocalLayouts(currentList);
+      setLocalLayouts(currentLayouts);
     }
   }, [layouts]);
 
-  // 3. دالة الصلاحيات (تم تعديلها لتسمح لك برؤية كل شيء إذا كنت الحساب القديم)
+  // 3. دالة الصلاحيات (الخاصة بـ KAROZH)
   const shouldShowWidget = (sectionName: string) => {
-    // إذا لم يتم تحميل المستخدم، نفترض أنه المدير ونعرض كل شيء
-    if (!currentUser) return true;
+    // إذا لم يتم تحميل المستخدم بعد، اظهر كل شيء مؤقتاً
+    if (!currentUser) return true; 
     
-    // إذا لم يكن لدى المستخدم حقل صلاحيات (الحساب القديم)، فهو المدير -> اعرض كل شيء
-    if (!currentUser.permissions) return true;
+    // ★★★ الحل السحري هنا ★★★
+    // إذا كان اسم المستخدم هو KAROZH (بأي حالة أحرف)، اعرض كل شيء فوراً
+    if (currentUser.username && currentUser.username.toUpperCase() === 'KAROZH') {
+      return true;
+    }
 
-    let perms = currentUser.permissions;
+    // للمستخدمين الآخرين: طبق الصلاحيات
+    if (!currentUser.permissions) return true; // حسابات قديمة أخرى تظهر لها كل شيء
+
+    let perms;
     try {
-      if (typeof perms === 'string') perms = JSON.parse(perms);
+      perms = typeof currentUser.permissions === 'string' 
+        ? JSON.parse(currentUser.permissions) 
+        : currentUser.permissions;
     } catch (e) { return true; }
 
-    // إذا كانت الصلاحيات فارغة -> مدير
-    if (!perms || Object.keys(perms).length === 0) return true;
+    if (!perms) return true;
 
-    // التحقق لباقي المستخدمين
     switch (sectionName) {
       case 'tests': return perms.tests?.access !== false;
       case 'patients': return perms.patients?.view !== false;
@@ -97,6 +106,7 @@ export default function Dashboard() {
     }
   };
 
+  // تصفية العناصر
   const visibleLayouts = localLayouts.filter(layout => shouldShowWidget(layout.sectionName));
 
   const gridLayout = visibleLayouts.map(layout => ({
@@ -107,39 +117,25 @@ export default function Dashboard() {
     h: layout.height,
   }));
 
+  // دوال الحفظ والتعديل (كما هي)
   const initLayoutsMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/dashboard-layouts/init", {}),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/dashboard-layouts"] }),
   });
-  
   const updateLayoutMutation = useMutation({
     mutationFn: ({ sectionName, data }: { sectionName: string; data: any }) =>
       apiRequest("PUT", `/api/dashboard-layouts/${sectionName}`, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/dashboard-layouts"] }),
   });
-
   useEffect(() => { if (layouts && layouts.length === 0) initLayoutsMutation.mutate(); }, [layouts]);
 
   const handleEditClick = (layout: DashboardLayout, e: React.MouseEvent) => { e.stopPropagation(); setEditingSection(layout); setEditForm({ displayName: layout.displayName, color: layout.color || "" }); };
-  
-  const handleSaveEdit = () => { 
-    if (!editingSection) return; 
-    
-    // تحديث الواجهة
-    setLocalLayouts(prev => prev.map(l => l.sectionName === editingSection.sectionName ? { ...l, displayName: editForm.displayName, color: editForm.color } : l)); 
-    
-    // إذا كان زر الحسابات "المحقون"، لن يتم حفظه في الداتابيس القديمة بسهولة، وهذا جيد حالياً
-    if (editingSection.sectionName !== 'accounts') {
-        updateLayoutMutation.mutate({ sectionName: editingSection.sectionName, data: { ...editingSection, displayName: editForm.displayName, color: editForm.color }, }); 
-    }
-    setEditingSection(null); 
-  };
-
+  const handleSaveEdit = () => { if (!editingSection) return; setLocalLayouts(prev => prev.map(l => l.sectionName === editingSection.sectionName ? { ...l, displayName: editForm.displayName, color: editForm.color } : l)); updateLayoutMutation.mutate({ sectionName: editingSection.sectionName, data: { ...editingSection, displayName: editForm.displayName, color: editForm.color }, }); setEditingSection(null); };
   const handleDragStop = (newLayout: any[]) => { if (isLocked) return; newLayout.forEach((item) => { const layout = localLayouts.find(l => l.sectionName === item.i); if (layout && (layout.positionX !== item.x || layout.positionY !== item.y)) { updateLayoutMutation.mutate({ sectionName: layout.sectionName, data: { ...layout, positionX: item.x, positionY: item.y, width: item.w, height: item.h } }); } }); };
   const handleResize = (newLayout: any[]) => { if (isLocked) return; setLocalLayouts(prev => prev.map(layout => { const item = newLayout.find(i => i.i === layout.sectionName); return item ? { ...layout, positionX: item.x, positionY: item.y, width: item.w, height: item.h } : layout; })); };
   const handleResizeStop = (newLayout: any[]) => { if (isLocked) return; newLayout.forEach((item) => { const layout = localLayouts.find(l => l.sectionName === item.i); if (layout) { updateLayoutMutation.mutate({ sectionName: layout.sectionName, data: { ...layout, positionX: item.x, positionY: item.y, width: item.w, height: item.h }, }); } }); };
 
-  if (isLoading || !layouts) return <div className="min-h-screen bg-background flex items-center justify-center">Loading...</div>;
+  if (isLoading) return <div className="min-h-screen bg-background flex items-center justify-center">Loading...</div>;
 
   return (
     <div className="min-h-screen bg-background">

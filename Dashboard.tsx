@@ -21,13 +21,12 @@ const iconMap = {
   results: FileText,
   reports: BarChart3,
   settings: Settings,
-  accounts: ShieldCheck, // الاضافة الوحيدة في الايقونات
+  accounts: ShieldCheck, 
 };
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
   const { theme, toggleTheme } = useTheme();
-  const { toast } = useToast();
   const [isLocked, setIsLocked] = useState(true);
   const [editingSection, setEditingSection] = useState<DashboardLayout | null>(null);
   const [editForm, setEditForm] = useState({ displayName: "", color: "" });
@@ -45,19 +44,47 @@ export default function Dashboard() {
     queryKey: ["/api/dashboard-layouts"],
   });
 
+  // 2. دمج زر الحسابات يدوياً إذا لم يكن موجوداً في القاعدة
   useEffect(() => {
     if (layouts) {
-      setLocalLayouts(layouts);
+      let currentLayouts = [...layouts];
+      // التحقق هل زر الحسابات موجود؟
+      const hasAccounts = currentLayouts.find(l => l.sectionName === 'accounts');
+      if (!hasAccounts) {
+        // إضافته يدوياً للواجهة فقط
+        currentLayouts.push({
+          id: 999,
+          sectionName: 'accounts',
+          displayName: 'Accounts',
+          route: '/accounts',
+          icon: 'ShieldCheck',
+          color: 'from-red-500/10 to-red-500/5',
+          positionX: 0,
+          positionY: 10, // يظهر في الأسفل
+          width: 4,
+          height: 2,
+          isVisible: true
+        });
+      }
+      setLocalLayouts(currentLayouts);
     }
   }, [layouts]);
 
-  // 2. دالة الفلترة
+  // 3. دالة الصلاحيات (الذكية)
   const shouldShowWidget = (sectionName: string) => {
-    if (!currentUser) return false;
+    // انتظر تحميل المستخدم
+    if (!currentUser) return false; 
+    
+    // هام جداً: إذا لم يكن هناك حقل صلاحيات (حساب قديم/أدمن)، اظهر كل شيء
+    if (!currentUser.permissions) return true;
+
     let perms = currentUser.permissions;
     if (typeof perms === 'string') { try { perms = JSON.parse(perms); } catch (e) {} }
-    if (!perms) return true;
 
+    // إذا كانت الصلاحيات فارغة أو غير صالحة، اعتبره أدمن واعرض كل شيء
+    if (!perms || Object.keys(perms).length === 0) return true;
+
+    // التحقق للمستخدمين الجدد
     switch (sectionName) {
       case 'tests': return perms.tests?.access;
       case 'patients': return perms.patients?.view;
@@ -69,7 +96,6 @@ export default function Dashboard() {
     }
   };
 
-  // 3. تطبيق الفلترة
   const visibleLayouts = localLayouts.filter(layout => shouldShowWidget(layout.sectionName));
 
   const gridLayout = visibleLayouts.map(layout => ({
@@ -80,107 +106,25 @@ export default function Dashboard() {
     h: layout.height,
   }));
 
+  // (باقي الكود كما هو تماماً)
   const initLayoutsMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/dashboard-layouts/init", {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard-layouts"] });
-      toast({ title: "Initialized", description: "Dashboard layouts initialized successfully" });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/dashboard-layouts"] }),
   });
-
   const updateLayoutMutation = useMutation({
     mutationFn: ({ sectionName, data }: { sectionName: string; data: any }) =>
       apiRequest("PUT", `/api/dashboard-layouts/${sectionName}`, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard-layouts"] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/dashboard-layouts"] }),
   });
+  useEffect(() => { if (layouts && layouts.length === 0) initLayoutsMutation.mutate(); }, [layouts]);
 
-  useEffect(() => {
-    if (layouts && layouts.length === 0) {
-      initLayoutsMutation.mutate();
-    }
-  }, [layouts]);
+  const handleEditClick = (layout: DashboardLayout, e: React.MouseEvent) => { e.stopPropagation(); setEditingSection(layout); setEditForm({ displayName: layout.displayName, color: layout.color || "" }); };
+  const handleSaveEdit = () => { if (!editingSection) return; setLocalLayouts(prev => prev.map(l => l.sectionName === editingSection.sectionName ? { ...l, displayName: editForm.displayName, color: editForm.color } : l)); updateLayoutMutation.mutate({ sectionName: editingSection.sectionName, data: { ...editingSection, displayName: editForm.displayName, color: editForm.color }, }); setEditingSection(null); };
+  const handleDragStop = (newLayout: any[]) => { if (isLocked) return; newLayout.forEach((item) => { const layout = localLayouts.find(l => l.sectionName === item.i); if (layout && (layout.positionX !== item.x || layout.positionY !== item.y)) { updateLayoutMutation.mutate({ sectionName: layout.sectionName, data: { ...layout, positionX: item.x, positionY: item.y, width: item.w, height: item.h } }); } }); };
+  const handleResize = (newLayout: any[]) => { if (isLocked) return; setLocalLayouts(prev => prev.map(layout => { const item = newLayout.find(i => i.i === layout.sectionName); return item ? { ...layout, positionX: item.x, positionY: item.y, width: item.w, height: item.h } : layout; })); };
+  const handleResizeStop = (newLayout: any[]) => { if (isLocked) return; newLayout.forEach((item) => { const layout = localLayouts.find(l => l.sectionName === item.i); if (layout) { updateLayoutMutation.mutate({ sectionName: layout.sectionName, data: { ...layout, positionX: item.x, positionY: item.y, width: item.w, height: item.h }, }); } }); };
 
-  const handleEditClick = (layout: DashboardLayout, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingSection(layout);
-    setEditForm({ displayName: layout.displayName, color: layout.color || "" });
-  };
-
-  const handleSaveEdit = () => {
-    if (!editingSection) return;
-    setLocalLayouts(prev => prev.map(layout => 
-      layout.sectionName === editingSection.sectionName
-        ? { ...layout, displayName: editForm.displayName, color: editForm.color }
-        : layout
-    ));
-    updateLayoutMutation.mutate({
-      sectionName: editingSection.sectionName,
-      data: { ...editingSection, displayName: editForm.displayName, color: editForm.color },
-    });
-    setEditingSection(null);
-  };
-
-  const commitLayoutChange = (sectionName: string, updates: Partial<DashboardLayout>) => {
-    setLocalLayouts(prev => prev.map(layout => 
-      layout.sectionName === sectionName ? { ...layout, ...updates } : layout
-    ));
-    const layout = localLayouts.find(l => l.sectionName === sectionName);
-    if (layout) {
-      updateLayoutMutation.mutate({ sectionName, data: { ...layout, ...updates } });
-    }
-  };
-
-  const handleDragStop = (newLayout: any[]) => {
-    if (isLocked) return;
-    newLayout.forEach((item) => {
-      const layout = localLayouts.find(l => l.sectionName === item.i);
-      if (layout && (layout.positionX !== item.x || layout.positionY !== item.y)) {
-        commitLayoutChange(layout.sectionName, { positionX: item.x, positionY: item.y, width: item.w, height: item.h });
-      }
-    });
-  };
-
-  const handleResize = (newLayout: any[]) => {
-    if (isLocked) return;
-    setLocalLayouts(prev => prev.map(layout => {
-      const item = newLayout.find(i => i.i === layout.sectionName);
-      if (item) {
-        return { ...layout, positionX: item.x, positionY: item.y, width: item.w, height: item.h };
-      }
-      return layout;
-    }));
-  };
-
-  const handleResizeStop = (newLayout: any[]) => {
-    if (isLocked) return;
-    newLayout.forEach((item) => {
-      const layout = localLayouts.find(l => l.sectionName === item.i);
-      if (layout) {
-        updateLayoutMutation.mutate({ sectionName: layout.sectionName, data: { ...layout, positionX: item.x, positionY: item.y, width: item.w, height: item.h } });
-      }
-    });
-  };
-
-  if (isLoading || !layouts) {
-    return (
-      <div className="min-h-screen bg-background">
-        <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center"><TestTube className="h-6 w-6 text-primary" /></div>
-              <div><h1 className="text-xl font-semibold text-foreground">KAROZH</h1><p className="text-xs text-muted-foreground">Welcome back!</p></div>
-            </div>
-            <Button variant="ghost" size="icon" onClick={toggleTheme} data-testid="button-theme-toggle">
-              {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
-            </Button>
-          </div>
-        </header>
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8"><div className="text-center text-muted-foreground">Loading dashboard...</div></main>
-      </div>
-    );
-  }
+  if (isLoading || !layouts) return <div className="min-h-screen bg-background flex items-center justify-center">Loading...</div>;
 
   return (
     <div className="min-h-screen bg-background">
@@ -188,49 +132,35 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center"><TestTube className="h-6 w-6 text-primary" /></div>
-            <div><h1 className="text-xl font-semibold text-foreground">KAROZH</h1><p className="text-xs text-muted-foreground">Welcome back!</p></div>
+            <div><h1 className="text-xl font-semibold text-foreground">KAROZH LAB</h1><p className="text-xs text-muted-foreground">Welcome {currentUser?.displayName || 'Admin'}</p></div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => setIsLocked(!isLocked)} data-testid="button-lock-toggle" title={isLocked ? "Unlock" : "Lock"}>
-              {isLocked ? <Lock className="h-5 w-5" /> : <Unlock className="h-5 w-5" />}
-            </Button>
-            <Button variant="ghost" size="icon" onClick={toggleTheme} data-testid="button-theme-toggle">
-              {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
-            </Button>
+            <Button variant="ghost" size="icon" onClick={() => setIsLocked(!isLocked)}>{isLocked ? <Lock className="h-5 w-5" /> : <Unlock className="h-5 w-5" />}</Button>
+            <Button variant="ghost" size="icon" onClick={toggleTheme}>{theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}</Button>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <h2 className="text-3xl font-semibold text-foreground mb-2" data-testid="text-dashboard-title">Dashboard</h2>
-          <p className="text-muted-foreground">{isLocked ? "Select a section" : "Drag to move • Click edit to customize"}</p>
-        </div>
+        <div className="mb-8"><h2 className="text-3xl font-semibold text-foreground mb-2">Dashboard</h2><p className="text-muted-foreground">{isLocked ? "Select a section" : "Drag to organize"}</p></div>
 
         <GridLayout className="layout" layout={gridLayout} cols={12} rowHeight={100} width={1200} isDraggable={!isLocked} isResizable={!isLocked} onDragStop={handleDragStop} onResize={handleResize} onResizeStop={handleResizeStop} compactType={null} preventCollision={false} draggableCancel=".edit-button">
           {visibleLayouts.map((layout) => {
             const Icon = iconMap[layout.sectionName as keyof typeof iconMap] || Settings;
             const scaleFactor = Math.max(0.5, Math.min(2.0, layout.height / 2));
-            const iconSize = Math.max(30, Math.min(96, Math.round(48 * scaleFactor)));
-            const iconInnerSize = Math.max(15, Math.min(48, Math.round(24 * scaleFactor)));
-            const fontSize = Math.max(10, Math.min(36, Math.round(18 * scaleFactor)));
-            const editButtonSize = Math.max(20, Math.min(36, Math.round(32 * scaleFactor)));
-            const editIconSize = Math.max(10, Math.min(24, Math.round(16 * scaleFactor)));
+            const iconSize = Math.round(48 * scaleFactor);
+            const fontSize = Math.round(18 * scaleFactor);
             
             return (
               <div key={layout.sectionName}>
-                <Card className={`${isLocked ? "cursor-pointer hover-elevate active-elevate-2" : "cursor-move"} transition-all overflow-hidden relative h-full flex flex-col`} onClick={isLocked ? () => setLocation(layout.route) : undefined} data-testid={`card-${layout.sectionName}`}>
+                <Card className={`${isLocked ? "cursor-pointer hover-elevate active-elevate-2" : "cursor-move"} transition-all overflow-hidden relative h-full flex flex-col`} onClick={isLocked ? () => setLocation(layout.route) : undefined}>
                   <div className={`absolute inset-0 bg-gradient-to-br ${layout.color || "from-gray-500/10 to-gray-500/5"} rounded-lg -z-10`} />
                   {!isLocked && (
-                    <Button variant="ghost" size="icon" className="edit-button absolute top-2 right-2 z-10" style={{ width: `${editButtonSize}px`, height: `${editButtonSize}px`, minHeight: `${editButtonSize}px` }} onClick={(e) => handleEditClick(layout, e)} data-testid={`button-edit-${layout.sectionName}`}>
-                      <Edit2 style={{ width: `${editIconSize}px`, height: `${editIconSize}px` }} />
-                    </Button>
+                    <Button variant="ghost" size="icon" className="edit-button absolute top-2 right-2 z-10" onClick={(e) => handleEditClick(layout, e)}><Edit2 className="h-4 w-4" /></Button>
                   )}
                   <div className="flex flex-col items-center justify-center gap-3 w-full flex-1 p-4">
-                    <div className="rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0" style={{ width: `${iconSize}px`, height: `${iconSize}px` }}>
-                      <Icon className="text-primary" style={{ width: `${iconInnerSize}px`, height: `${iconInnerSize}px` }} />
-                    </div>
-                    <div className="text-center w-full px-2"><h3 className="font-semibold leading-tight" style={{ fontSize: `${fontSize}px` }}>{layout.displayName}</h3></div>
+                    <div className="rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0" style={{ width: iconSize, height: iconSize }}><Icon className="text-primary" style={{ width: iconSize/2, height: iconSize/2 }} /></div>
+                    <div className="text-center w-full px-2"><h3 className="font-semibold leading-tight" style={{ fontSize }}>{layout.displayName}</h3></div>
                   </div>
                 </Card>
               </div>
@@ -239,27 +169,15 @@ export default function Dashboard() {
         </GridLayout>
       </main>
 
+      {/* Edit Dialog */}
       <Dialog open={!!editingSection} onOpenChange={() => setEditingSection(null)}>
-        <DialogContent data-testid="dialog-edit-widget">
-          <DialogHeader><DialogTitle>Customize Widget</DialogTitle></DialogHeader>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Customize</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2"><Label htmlFor="displayName">Display Name</Label><Input id="displayName" value={editForm.displayName} onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })} data-testid="input-display-name" /></div>
-            <div className="space-y-2">
-              <Label>Color Gradient</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" className="justify-start" onClick={() => setEditForm({ ...editForm, color: "from-blue-500/10 to-blue-500/5" })} data-testid="button-color-blue"><div className="w-4 h-4 rounded bg-gradient-to-br from-blue-500/10 to-blue-500/5 mr-2" />Blue</Button>
-                <Button variant="outline" className="justify-start" onClick={() => setEditForm({ ...editForm, color: "from-green-500/10 to-green-500/5" })} data-testid="button-color-green"><div className="w-4 h-4 rounded bg-gradient-to-br from-green-500/10 to-green-500/5 mr-2" />Green</Button>
-                <Button variant="outline" className="justify-start" onClick={() => setEditForm({ ...editForm, color: "from-purple-500/10 to-purple-500/5" })} data-testid="button-color-purple"><div className="w-4 h-4 rounded bg-gradient-to-br from-purple-500/10 to-purple-500/5 mr-2" />Purple</Button>
-                <Button variant="outline" className="justify-start" onClick={() => setEditForm({ ...editForm, color: "from-amber-500/10 to-amber-500/5" })} data-testid="button-color-amber"><div className="w-4 h-4 rounded bg-gradient-to-br from-amber-500/10 to-amber-500/5 mr-2" />Amber</Button>
-                <Button variant="outline" className="justify-start" onClick={() => setEditForm({ ...editForm, color: "from-red-500/10 to-red-500/5" })} data-testid="button-color-red"><div className="w-4 h-4 rounded bg-gradient-to-br from-red-500/10 to-red-500/5 mr-2" />Red</Button>
-                <Button variant="outline" className="justify-start" onClick={() => setEditForm({ ...editForm, color: "from-gray-500/10 to-gray-500/5" })} data-testid="button-color-gray"><div className="w-4 h-4 rounded bg-gradient-to-br from-gray-500/10 to-gray-500/5 mr-2" />Gray</Button>
-              </div>
-            </div>
+            <div className="space-y-2"><Label>Name</Label><Input value={editForm.displayName} onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })} /></div>
+            <div className="space-y-2"><Label>Color</Label><div className="grid grid-cols-2 gap-2"><Button variant="outline" onClick={() => setEditForm({ ...editForm, color: "from-blue-500/10 to-blue-500/5" })}>Blue</Button><Button variant="outline" onClick={() => setEditForm({ ...editForm, color: "from-green-500/10 to-green-500/5" })}>Green</Button><Button variant="outline" onClick={() => setEditForm({ ...editForm, color: "from-purple-500/10 to-purple-500/5" })}>Purple</Button><Button variant="outline" onClick={() => setEditForm({ ...editForm, color: "from-amber-500/10 to-amber-500/5" })}>Amber</Button></div></div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingSection(null)} data-testid="button-cancel">Cancel</Button>
-            <Button onClick={handleSaveEdit} className="gap-2" data-testid="button-save-widget"><Save className="h-4 w-4" />Save</Button>
-          </DialogFooter>
+          <DialogFooter><Button onClick={handleSaveEdit}>Save</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -1278,4 +1278,174 @@ export default function Results() {
                       id="edit-age"
                       type="number"
                       value={patientFormData.age}
-                      onChange={(e) => setPatientFormData({
+                      onChange={(e) => setPatientFormData({ ...patientFormData, age: e.target.value })}
+                      placeholder="Age"
+                      data-testid="input-edit-age"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-gender">Gender</Label>
+                    <Input
+                      id="edit-gender"
+                      value={patientFormData.gender}
+                      onChange={(e) => setPatientFormData({ ...patientFormData, gender: e.target.value })}
+                      placeholder="Gender"
+                      data-testid="input-edit-gender"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-phone">Phone</Label>
+                    <Input
+                      id="edit-phone"
+                      value={patientFormData.phone}
+                      onChange={(e) => setPatientFormData({ ...patientFormData, phone: e.target.value })}
+                      placeholder="Phone number"
+                      data-testid="input-edit-phone"
+                    />
+                  </div>
+                  <div className="space-y-2 col-span-2">
+                    <Label htmlFor="edit-source">Source</Label>
+                    <Input
+                      id="edit-source"
+                      value={patientFormData.source}
+                      onChange={(e) => setPatientFormData({ ...patientFormData, source: e.target.value })}
+                      placeholder="Patient source"
+                      data-testid="input-edit-source"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Tests Management Section */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-foreground">Requested Tests</h3>
+                  <span className="text-xs text-muted-foreground">
+                    {visitFormData.testIds.length} test(s) selected
+                  </span>
+                </div>
+                
+                {/* Current Tests */}
+                <div className="space-y-2 max-h-48 overflow-y-auto border border-border rounded-lg p-3">
+                  {visitFormData.testIds.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">No tests selected</p>
+                  ) : (
+                    visitFormData.testIds.map((testId) => {
+                      const test = allTests?.find(t => t.id === testId);
+                      if (!test) return null;
+                      return (
+                        <div key={testId} className="flex items-center justify-between p-2 bg-muted/30 rounded hover-elevate" data-testid={`test-item-${testId}`}>
+                          <div className="flex-1">
+                            <p className="text-sm font-medium">{test.name}</p>
+                            {test.price && (
+                              <p className="text-xs text-muted-foreground">{test.price} IQD</p>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleRemoveTest(testId)}
+                            className="h-8 w-8"
+                            data-testid={`button-remove-test-${testId}`}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Add Test Dropdown */}
+                <div className="space-y-2">
+                  <Label htmlFor="add-test">Add Test</Label>
+                  <Select onValueChange={handleAddTest} value="">
+                    <SelectTrigger id="add-test" data-testid="select-add-test">
+                      <SelectValue placeholder="Select a test to add" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allTests?.filter(test => !visitFormData.testIds.includes(test.id)).map((test) => (
+                        <SelectItem key={test.id} value={test.id}>
+                          {test.name} {test.price ? `(${test.price} IQD)` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Pricing Section */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-foreground">Pricing</h3>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-total-cost">Total Cost (IQD)</Label>
+                  <Input
+                    id="edit-total-cost"
+                    type="number"
+                    value={visitFormData.totalCost}
+                    onChange={(e) => setVisitFormData({ ...visitFormData, totalCost: parseFloat(e.target.value) || 0 })}
+                    placeholder="Total cost"
+                    data-testid="input-edit-total-cost"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Suggested: {allTests?.filter(t => visitFormData.testIds.includes(t.id)).reduce((sum, t) => sum + (t.price || 0), 0)} IQD
+                  </p>
+                </div>
+              </div>
+            </div>
+            <DialogFooter className="flex gap-2 sm:gap-0">
+              <Button
+                variant="destructive"
+                onClick={() => setDeleteDialogOpen(true)}
+                className="gap-2"
+                data-testid="button-delete-patient"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete Patient
+              </Button>
+              <div className="flex gap-2 ml-auto">
+                <Button
+                  variant="outline"
+                  onClick={() => setEditDialogOpen(false)}
+                  data-testid="button-cancel-edit"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSavePatient}
+                  disabled={!patientFormData.name || updatePatientMutation.isPending}
+                  data-testid="button-save-patient"
+                >
+                  {updatePatientMutation.isPending ? "Saving..." : "Save"}
+                </Button>
+              </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent data-testid="dialog-confirm-delete">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Are you sure you want to permanently delete this patient?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the patient and all related data including visits, test results, and expenses.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeletePatient}
+                className="bg-destructive hover:bg-destructive/90"
+                disabled={deletePatientMutation.isPending}
+                data-testid="button-confirm-delete"
+              >
+                {deletePatientMutation.isPending ? "Deleting..." : "Confirm Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </div>
+  );
+}

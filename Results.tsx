@@ -98,7 +98,6 @@ export default function Results() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
       queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
-      setEditDialogOpen(false);
       toast({
         title: "Changes Saved",
         description: "Patient information has been updated successfully",
@@ -149,6 +148,15 @@ export default function Results() {
         variant: "destructive",
       });
     },
+  });
+
+  // Added for deletion fix
+  const deleteTestResultMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/test-results/${id}`, {}),
+  });
+
+  const createTestResultMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/test-results", data),
   });
 
   const batchUpdateMutation = useMutation({
@@ -242,6 +250,54 @@ export default function Results() {
         patient: updatedPatientData,
       });
 
+      // --- FIXED DELETE LOGIC START ---
+      const oldTestIds = editingVisit.testIds || [];
+      const newTestIds = visitFormData.testIds;
+
+      // Identify added and removed tests
+      const addedTestIds = newTestIds.filter(id => !oldTestIds.includes(id));
+      const removedTestIds = oldTestIds.filter(id => !newTestIds.includes(id));
+
+      // 1. DELETE TESTS
+      if (removedTestIds.length > 0) {
+        // Find results to delete from current state
+        const resultsToDelete = results.filter(r => removedTestIds.includes(r.testId));
+        
+        for (const res of resultsToDelete) {
+           await deleteTestResultMutation.mutateAsync(res.id);
+        }
+        
+        // Update local state immediately so it disappears from screen
+        setResults(prev => prev.filter(r => !removedTestIds.includes(r.testId)));
+      }
+
+      // 2. ADD TESTS
+      for (const testId of addedTestIds) {
+        const testDef = allTests?.find(t => t.id === testId);
+        if (testDef) {
+           const resultData: any = {
+              visitId: editingVisit.id,
+              testId: testDef.id,
+              testName: testDef.name,
+              price: testDef.price,
+              unit: testDef.unit,
+              normalRange: testDef.normalRange,
+              testType: testDef.testType || "standard",
+           };
+           if (testDef.testType === "urine") {
+              resultData.urineData = {
+                colour: "Amber Yellow", aspect: "Clear", reaction: "Acidic",
+                specificGravity: "1015-1025", glucose: "Nil", protein: "Nil",
+                bilirubin: "Nil", ketones: "Nil", nitrite: "Nil", leukocyte: "Nil",
+                blood: "Nil", pusCells: "Nil", redCells: "Nil", epithelialCell: "Nil",
+                bacteria: "Nil", crystals: "Nil", amorphous: "Nil", mucus: "Nil", other: "Nil"
+              };
+           }
+           await createTestResultMutation.mutateAsync(resultData);
+        }
+      }
+      // --- FIXED DELETE LOGIC END ---
+
       // Update visit data (tests and price)
       const updatedVisitData: Partial<Visit> = {
         testIds: visitFormData.testIds,
@@ -253,13 +309,17 @@ export default function Results() {
         visit: updatedVisitData,
       });
 
+      // Invalidate to fetch fresh data
+      await queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
+
       setEditDialogOpen(false);
       toast({
         title: "Changes Saved",
         description: "Patient and visit information have been updated successfully",
       });
     } catch (error) {
-      // Error handling is in the mutations
+      // Error handling
     }
   };
 
@@ -357,7 +417,6 @@ export default function Results() {
     const bottomSections = customSections.filter(s => s.position === "bottom" && s.text.trim());
 
     // 🎯 Smart Intelligent Pagination System
-    // Define long tests that need their own dedicated page
     const LONG_TEST_KEYWORDS = [
       'urine', 'stool', 'culture', 'blood culture', 
       'urine analysis', 'stool analysis', 'sensitivity'
@@ -419,6 +478,10 @@ export default function Results() {
             <span class="info-value">${escapeHtml(patientData.gender)}</span>
           </div>
           ` : ''}
+          <div class="info-item">
+            <span class="info-label">Date:</span>
+            <span class="info-value" style="font-size: 12px;">${selectedVisitData.visitDate}</span>
+          </div>
           ${patientData?.phone ? `
           <div class="info-item">
             <span class="info-label">Phone:</span>
@@ -489,7 +552,7 @@ export default function Results() {
             }
             .info-grid {
               display: grid;
-              grid-template-columns: repeat(2, 1fr);
+              grid-template-columns: repeat(3, 1fr);
               gap: 12px;
             }
             .info-item {

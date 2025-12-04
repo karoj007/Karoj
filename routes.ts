@@ -11,12 +11,14 @@ import {
   insertSettingSchema,
   insertDashboardLayoutSchema,
   loginSchema,
+  insertUserSchema, // Added user schema
 } from "@shared/schema";
 
 declare module "express-session" {
   interface SessionData {
     authenticated?: boolean;
     username?: string;
+    user?: any; // Added user object to session
   }
 }
 
@@ -35,13 +37,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { username, password } = loginSchema.parse(req.body);
       
+      // 1. Check Super Admin
       if (username === "KAROZH" && password === "Karoj1996") {
         req.session.authenticated = true;
         req.session.username = username;
-        res.json({ success: true, message: "Login successful" });
-      } else {
-        res.status(401).json({ success: false, message: "Invalid username or password" });
+        // Full Admin permissions
+        req.session.user = { 
+          username: "KAROZH", 
+          displayName: "Super Admin",
+          permissions: null // Null means full access in our logic
+        };
+        return res.json({ success: true, message: "Login successful" });
+      } 
+      
+      // 2. Check Database Users
+      const user = await storage.getUserByUsername(username);
+      if (user && user.password === password) {
+        req.session.authenticated = true;
+        req.session.username = user.username;
+        req.session.user = user;
+        return res.json({ success: true, message: "Login successful" });
       }
+
+      res.status(401).json({ success: false, message: "Invalid username or password" });
     } catch (error) {
       res.status(400).json({ error: "Invalid request data" });
     }
@@ -50,7 +68,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Session validation
   app.get("/api/session", (req, res) => {
     if (req.session?.authenticated) {
-      res.json({ authenticated: true, username: req.session.username });
+      res.json({ 
+        authenticated: true, 
+        username: req.session.username,
+        user: req.session.user 
+      });
     } else {
       res.json({ authenticated: false });
     }
@@ -65,6 +87,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json({ success: true });
       }
     });
+  });
+
+  // Users Routes (NEW - ADDED FOR ACCOUNTS)
+  app.get("/api/users", requireAuth, async (req, res) => {
+    const users = await storage.getAllUsers();
+    res.json(users);
+  });
+
+  app.post("/api/users", requireAuth, async (req, res) => {
+    try {
+      const data = insertUserSchema.parse(req.body);
+      const user = await storage.createUser(data);
+      res.json(user);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid user data or username exists" });
+    }
+  });
+
+  app.put("/api/users/:id", requireAuth, async (req, res) => {
+    try {
+      const data = insertUserSchema.partial().parse(req.body);
+      const user = await storage.updateUser(req.params.id, data);
+      res.json(user);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid user data" });
+    }
+  });
+
+  app.delete("/api/users/:id", requireAuth, async (req, res) => {
+    await storage.deleteUser(req.params.id);
+    res.json({ success: true });
   });
 
   // Tests Routes

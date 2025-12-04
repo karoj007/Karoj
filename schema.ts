@@ -168,6 +168,20 @@ export const customPrintSectionSchema = z.object({
 
 export type CustomPrintSection = z.infer<typeof customPrintSectionSchema>;
 
+// Users Schema (NEW - ADDED FOR ACCOUNTS FEATURE)
+export const userSchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  username: z.string(),
+  password: z.string(),
+  permissions: z.string().optional(), // Stored as JSON string
+  createdAt: z.string(),
+});
+
+export const insertUserSchema = userSchema.omit({ id: true, createdAt: true });
+export type User = z.infer<typeof userSchema>;
+export type InsertUser = z.infer<typeof insertUserSchema>;
+
 // Drizzle ORM Table Definitions
 export const tests = pgTable("tests", {
   id: text("id").primaryKey(),
@@ -237,4 +251,14 @@ export const dashboardLayouts = pgTable("dashboard_layouts", {
   height: integer("height").notNull(),
   color: text("color"),
   route: text("route").notNull(),
+});
+
+// Users Table (NEW - ADDED FOR ACCOUNTS FEATURE)
+export const users = pgTable("users", {
+  id: text("id").primaryKey(),
+  displayName: text("display_name").notNull(),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
+  permissions: text("permissions"), // JSON string
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });

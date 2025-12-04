@@ -13,8 +13,8 @@ import {
   type InsertSetting,
   type DashboardLayout,
   type InsertDashboardLayout,
-  type User,               // New
-  type InsertUser,         // New
+  type User,               // تمت الاضافة
+  type InsertUser,         // تمت الاضافة
   tests,
   patients,
   visits,
@@ -22,14 +22,14 @@ import {
   expenses,
   settings,
   dashboardLayouts,
-  users,                   // New
+  users,                   // تمت الاضافة
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and, desc } from "drizzle-orm"; // Added desc
+import { eq, and, desc } from "drizzle-orm";
 
 export interface IStorage {
-  // Users (New Section)
+  // Users (القسم الجديد)
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getAllUsers(): Promise<User[]>;
@@ -96,7 +96,7 @@ export class MemStorage implements IStorage {
   private testResults: Map<string, TestResult>;
   private expenses: Map<string, Expense>;
   private settings: Map<string, Setting>;
-  private users: Map<string, User>; // New
+  private users: Map<string, User>; // تمت الاضافة
 
   constructor() {
     this.tests = new Map();
@@ -105,10 +105,10 @@ export class MemStorage implements IStorage {
     this.testResults = new Map();
     this.expenses = new Map();
     this.settings = new Map();
-    this.users = new Map(); // New
+    this.users = new Map(); // تمت الاضافة
   }
 
-  // Users Implementation (MemStorage) - New
+  // Users Implementation (MemStorage) - تمت الاضافة
   async getUser(id: string): Promise<User | undefined> {
     return this.users.get(id);
   }
@@ -123,11 +123,11 @@ export class MemStorage implements IStorage {
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
-    const user: User = { 
-      ...insertUser, 
-      id, 
+    const user: User = {
+      ...insertUser,
+      id,
       createdAt: new Date().toISOString(),
-      permissions: insertUser.permissions || undefined
+      permissions: insertUser.permissions || undefined,
     };
     this.users.set(id, user);
     return user;
@@ -394,11 +394,11 @@ export class MemStorage implements IStorage {
     return [];
   }
 
-  async getDashboardLayoutByName(sectionName: string): Promise<DashboardLayout | undefined> {
+  async getDashboardLayoutByName(_sectionName: string): Promise<DashboardLayout | undefined> {
     return undefined;
   }
 
-  async upsertDashboardLayout(layout: InsertDashboardLayout): Promise<DashboardLayout> {
+  async upsertDashboardLayout(_layout: InsertDashboardLayout): Promise<DashboardLayout> {
     throw new Error("Dashboard layouts not supported in MemStorage");
   }
 

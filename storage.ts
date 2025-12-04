@@ -13,6 +13,8 @@ import {
   type InsertSetting,
   type DashboardLayout,
   type InsertDashboardLayout,
+  type User,               // Added
+  type InsertUser,         // Added
   tests,
   patients,
   visits,
@@ -20,12 +22,21 @@ import {
   expenses,
   settings,
   dashboardLayouts,
+  users,                   // Added
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm"; // Added desc
 
 export interface IStorage {
+  // Users (NEW)
+  getUser(id: string): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  getAllUsers(): Promise<User[]>;
+  createUser(user: InsertUser): Promise<User>;
+  updateUser(id: string, user: Partial<InsertUser>): Promise<User>;
+  deleteUser(id: string): Promise<void>;
+
   // Tests
   getAllTests(): Promise<Test[]>;
   getTestById(id: string): Promise<Test | undefined>;
@@ -85,6 +96,7 @@ export class MemStorage implements IStorage {
   private testResults: Map<string, TestResult>;
   private expenses: Map<string, Expense>;
   private settings: Map<string, Setting>;
+  private users: Map<string, User>; // Added
 
   constructor() {
     this.tests = new Map();
@@ -93,6 +105,39 @@ export class MemStorage implements IStorage {
     this.testResults = new Map();
     this.expenses = new Map();
     this.settings = new Map();
+    this.users = new Map(); // Added
+  }
+
+  // Users Implementation (MemStorage)
+  async getUser(id: string): Promise<User | undefined> {
+    return this.users.get(id);
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(u => u.username === username);
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return Array.from(this.users.values());
+  }
+
+  async createUser(insertUser: InsertUser): Promise<User> {
+    const id = randomUUID();
+    const user: User = { ...insertUser, id, createdAt: new Date().toISOString(), permissions: insertUser.permissions || undefined };
+    this.users.set(id, user);
+    return user;
+  }
+
+  async updateUser(id: string, insertUser: Partial<InsertUser>): Promise<User> {
+    const existing = this.users.get(id);
+    if (!existing) throw new Error("User not found");
+    const updated = { ...existing, ...insertUser };
+    this.users.set(id, updated);
+    return updated;
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    this.users.delete(id);
   }
 
   // Tests
@@ -375,6 +420,65 @@ export class DatabaseStorage implements IStorage {
   // Helper function to convert null to undefined for optional fields
   private nullToUndefined<T>(value: T | null): T | undefined {
     return value === null ? undefined : value;
+  }
+
+  // --- USERS (NEW) ---
+  async getUser(id: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    if (!user) return undefined;
+    return {
+      ...user,
+      permissions: user.permissions || undefined,
+      createdAt: this.toISOString(user.createdAt)
+    };
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    if (!user) return undefined;
+    return {
+      ...user,
+      permissions: user.permissions || undefined,
+      createdAt: this.toISOString(user.createdAt)
+    };
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    const results = await db.select().from(users).orderBy(desc(users.createdAt));
+    return results.map(user => ({
+      ...user,
+      permissions: user.permissions || undefined,
+      createdAt: this.toISOString(user.createdAt)
+    }));
+  }
+
+  async createUser(insertUser: InsertUser): Promise<User> {
+    const id = randomUUID();
+    const [user] = await db.insert(users).values({
+      id,
+      ...insertUser,
+    }).returning();
+    return {
+      ...user,
+      permissions: user.permissions || undefined,
+      createdAt: this.toISOString(user.createdAt)
+    };
+  }
+
+  async updateUser(id: string, updateUser: Partial<InsertUser>): Promise<User> {
+    const [user] = await db.update(users)
+      .set(updateUser)
+      .where(eq(users.id, id))
+      .returning();
+    return {
+      ...user,
+      permissions: user.permissions || undefined,
+      createdAt: this.toISOString(user.createdAt)
+    };
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await db.delete(users).where(eq(users.id, id));
   }
 
   // Tests
@@ -741,7 +845,8 @@ export class DatabaseStorage implements IStorage {
 
   // Settings
   async getAllSettings(): Promise<Setting[]> {
-    return await db.select().from(settings);
+    const results = await db.select().from(settings);
+    return results;
   }
 
   async getSettingByKey(key: string): Promise<Setting | undefined> {

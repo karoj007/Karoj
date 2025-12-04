@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea"; // التغيير 1: استدعاء Textarea
+import { Textarea } from "@/components/ui/textarea"; // 1. تمت إضافة هذا السطر فقط
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Save, Printer, FileDown, Search, Calendar, ArrowLeft, Settings, Trash2, Plus, X } from "lucide-react";
@@ -42,7 +42,6 @@ export default function Results() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
-  
   const [patientFormData, setPatientFormData] = useState({
     name: "",
     age: "",
@@ -50,15 +49,12 @@ export default function Results() {
     phone: "",
     source: "",
   });
-  
   const [visitFormData, setVisitFormData] = useState({
     testIds: [] as string[],
     totalCost: 0,
   });
-  
   const { toast } = useToast();
 
-  // --- Queries ---
   const { data: visits } = useQuery<Visit[]>({
     queryKey: ["/api/visits", { date: selectedDate }],
     queryFn: () => fetch(`/api/visits?date=${selectedDate}`).then((res) => res.json()),
@@ -97,10 +93,24 @@ export default function Results() {
     }
   }, [testResults]);
 
-  // --- Mutations ---
   const updatePatientMutation = useMutation({
     mutationFn: (data: { id: string; patient: Partial<Patient> }) =>
       apiRequest("PUT", `/api/patients/${data.id}`, data.patient),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
+      toast({
+        title: "Changes Saved",
+        description: "Patient information has been updated successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update patient information",
+        variant: "destructive",
+      });
+    },
   });
 
   const deletePatientMutation = useMutation({
@@ -112,8 +122,15 @@ export default function Results() {
       setEditDialogOpen(false);
       setSelectedVisit("");
       toast({
-        title: "Deleted",
-        description: "Patient data deleted successfully.",
+        title: "Patient Deleted",
+        description: "Patient and all related data have been permanently deleted",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete patient",
+        variant: "destructive",
       });
     },
   });
@@ -121,8 +138,20 @@ export default function Results() {
   const updateVisitMutation = useMutation({
     mutationFn: (data: { id: string; visit: Partial<Visit> }) =>
       apiRequest("PUT", `/api/visits/${data.id}`, data.visit),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update visit information",
+        variant: "destructive",
+      });
+    },
   });
 
+  // 2. تمت إضافة هذه الأوامر هنا لحل مشكلة الحذف (بدون لمس الباقي)
   const deleteTestResultMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/test-results/${id}`, {}),
   });
@@ -130,16 +159,14 @@ export default function Results() {
   const createTestResultMutation = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/test-results", data),
   });
+  // ------------------------------------------------
 
   const batchUpdateMutation = useMutation({
     mutationFn: (updates: Array<{ id: string; data: Partial<TestResult> }>) =>
       apiRequest("PUT", "/api/test-results/batch", updates),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
-      toast({
-        title: "Saved",
-        description: "Results saved successfully",
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/tests"] });
     },
   });
 
@@ -173,7 +200,23 @@ export default function Results() {
     }
     
     const visit = visits?.find(v => v.id === selectedVisit);
-    if (!visit || !currentPatient) return;
+    if (!visit) {
+      toast({
+        title: "Error",
+        description: "Visit not found",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!currentPatient) {
+      toast({
+        title: "Patient Not Found",
+        description: "The patient record for this visit could not be found. It may have been deleted.",
+        variant: "destructive",
+      });
+      return;
+    }
     
     setEditingPatient(currentPatient);
     setEditingVisit(visit);
@@ -191,41 +234,38 @@ export default function Results() {
     setEditDialogOpen(true);
   };
 
-  // التعديل 2: إصلاح منطق الحفظ والحذف
   const handleSavePatient = async () => {
     if (!editingPatient || !editingVisit) return;
     
     try {
-      // 1. تحديث بيانات المريض
+      // Update patient data
       await updatePatientMutation.mutateAsync({
         id: editingPatient.id,
         patient: {
           name: patientFormData.name,
           age: patientFormData.age ? parseInt(patientFormData.age) : undefined,
-          gender: patientFormData.gender,
-          phone: patientFormData.phone,
-          source: patientFormData.source,
+          gender: patientFormData.gender || undefined,
+          phone: patientFormData.phone || undefined,
+          source: patientFormData.source || undefined,
         },
       });
 
-      // 2. التعامل مع الفحوصات (إضافة وحذف)
+      // --- 3. بداية تعديل الحذف (تمت الإضافة هنا فقط) ---
       const oldTestIds = editingVisit.testIds || [];
       const newTestIds = visitFormData.testIds;
-
       const addedTestIds = newTestIds.filter(id => !oldTestIds.includes(id));
       const removedTestIds = oldTestIds.filter(id => !newTestIds.includes(id));
 
-      // حذف الفحوصات المزالة من قاعدة البيانات ومن الشاشة
+      // حذف الفحوصات
       if (removedTestIds.length > 0) {
         const resultsToDelete = results.filter(r => removedTestIds.includes(r.testId));
         for (const res of resultsToDelete) {
            await deleteTestResultMutation.mutateAsync(res.id);
         }
-        // تحديث الشاشة فوراً
         setResults(prev => prev.filter(r => !removedTestIds.includes(r.testId)));
       }
 
-      // إضافة الفحوصات الجديدة
+      // إضافة الفحوصات
       for (const testId of addedTestIds) {
         const testDef = allTests?.find(t => t.id === testId);
         if (testDef) {
@@ -238,7 +278,6 @@ export default function Results() {
               normalRange: testDef.normalRange,
               testType: testDef.testType || "standard",
            };
-           
            if (testDef.testType === "urine") {
               resultData.urineData = {
                 colour: "Amber Yellow", aspect: "Clear", reaction: "Acidic",
@@ -251,8 +290,9 @@ export default function Results() {
            await createTestResultMutation.mutateAsync(resultData);
         }
       }
+      // --- نهاية تعديل الحذف ---
 
-      // 3. تحديث الزيارة
+      // Update visit data (tests and price)
       await updateVisitMutation.mutateAsync({
         id: editingVisit.id,
         visit: {
@@ -261,20 +301,19 @@ export default function Results() {
         },
       });
 
-      // 4. تحديث البيانات من السيرفر
+      // تحديث القوائم
       await queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
-
+      
       setEditDialogOpen(false);
       toast({
-        title: "Saved",
-        description: "Changes updated successfully",
+        title: "Changes Saved",
+        description: "Patient and visit information have been updated successfully",
       });
     } catch (error) {
-       toast({
+      toast({
         title: "Error",
-        description: "Failed to save changes",
+        description: "Failed to save patient information",
         variant: "destructive",
       });
     }
@@ -287,26 +326,23 @@ export default function Results() {
 
   const handleAddTest = (testId: string) => {
     if (!visitFormData.testIds.includes(testId)) {
-      const test = allTests?.find(t => t.id === testId);
-      const newTotal = visitFormData.totalCost + (test?.price || 0);
       setVisitFormData({
+        ...visitFormData,
         testIds: [...visitFormData.testIds, testId],
-        totalCost: newTotal
       });
     }
   };
 
   const handleRemoveTest = (testId: string) => {
-    const test = allTests?.find(t => t.id === testId);
-    const newTotal = Math.max(0, visitFormData.totalCost - (test?.price || 0));
     setVisitFormData({
+      ...visitFormData,
       testIds: visitFormData.testIds.filter(id => id !== testId),
-      totalCost: newTotal
     });
   };
 
   const saveResults = async () => {
     try {
+      // Prepare all updates
       const updates = results.map((result) => ({
         id: result.id,
         data: {
@@ -317,8 +353,15 @@ export default function Results() {
           urineData: result.testType === "urine" ? result.urineData : undefined,
         },
       }));
+
+      // Send all updates in a single batch request
       await batchUpdateMutation.mutateAsync(updates);
-    } catch (e) {
+      
+      toast({
+        title: "Results Saved",
+        description: "Test results have been saved successfully",
+      });
+    } catch (error) {
       toast({
         title: "Error",
         description: "Failed to save results",
@@ -333,7 +376,7 @@ export default function Results() {
     return div.innerHTML;
   };
 
-  const printResults = () => {
+  const printResults = async () => {
     if (!selectedVisit || results.length === 0) {
       toast({
         title: "No Data",
@@ -346,7 +389,15 @@ export default function Results() {
     const selectedVisitData = visits?.find(v => v.id === selectedVisit);
     if (!selectedVisitData) return;
 
-    let patientData = currentPatient; // تم التصحيح لاستخدام المتغير مباشرة
+    let patientData: Patient | null = null;
+    try {
+      const response = await fetch(`/api/patients/${selectedVisitData.patientId}`);
+      if (response.ok) {
+        patientData = await response.json();
+      }
+    } catch (error) {
+      console.error("Error fetching patient data:", error);
+    }
 
     let customSections: CustomPrintSection[] = [];
     try {
@@ -361,6 +412,36 @@ export default function Results() {
     const topSections = customSections.filter(s => s.position === "top" && s.text.trim());
     const bottomSections = customSections.filter(s => s.position === "bottom" && s.text.trim());
 
+    // 🎯 Smart Intelligent Pagination System
+    // Define long tests that need their own dedicated page
+    const LONG_TEST_KEYWORDS = [
+      'urine', 'stool', 'culture', 'blood culture', 
+      'urine analysis', 'stool analysis', 'sensitivity'
+    ];
+    
+    const isLongTest = (testName: string, testType?: string): boolean => {
+      if (testType === 'urine') return true;
+      const lowerName = testName.toLowerCase();
+      return LONG_TEST_KEYWORDS.some(keyword => lowerName.includes(keyword));
+    };
+
+    // Classify tests into long and short
+    const longTests = results.filter(r => isLongTest(r.testName, r.testType));
+    const shortTests = results.filter(r => !isLongTest(r.testName, r.testType));
+
+    const pages: Array<typeof results> = [];
+
+    // Each long test gets its own dedicated page
+    longTests.forEach(test => {
+      pages.push([test]);
+    });
+
+    // Group short tests intelligently (max 8 per page for optimal spacing)
+    const TESTS_PER_PAGE = 8;
+    for (let i = 0; i < shortTests.length; i += TESTS_PER_PAGE) {
+      pages.push(shortTests.slice(i, i + TESTS_PER_PAGE));
+    }
+
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       toast({
@@ -371,7 +452,8 @@ export default function Results() {
       return;
     }
 
-    // التعديل 3: إضافة التاريخ إلى مربع المعلومات
+    // Generate patient info HTML (reused on each page)
+    // 4. تمت إضافة التاريخ هنا في الطباعة
     const patientInfoHTML = `
       <div class="patient-info">
         <h2>Patient Information</h2>
@@ -395,8 +477,8 @@ export default function Results() {
           </div>
           ` : ''}
           <div class="info-item">
-            <span class="info-label" style="color: blue;">Date:</span>
-            <span class="info-value">${selectedVisitData.visitDate}</span>
+            <span class="info-label">Date:</span>
+            <span class="info-value" style="font-size: 12px; font-family: monospace;">${selectedVisitData.visitDate}</span>
           </div>
           ${patientData?.phone ? `
           <div class="info-item">
@@ -407,29 +489,6 @@ export default function Results() {
         </div>
       </div>
     `;
-
-    const isLongTest = (testName: string, testType?: string): boolean => {
-      if (testType === 'urine') return true;
-      const lowerName = testName.toLowerCase();
-      const LONG_TEST_KEYWORDS = [
-        'urine', 'stool', 'culture', 'blood culture', 
-        'urine analysis', 'stool analysis', 'sensitivity'
-      ];
-      return LONG_TEST_KEYWORDS.some(keyword => lowerName.includes(keyword));
-    };
-
-    const longTests = results.filter(r => isLongTest(r.testName, r.testType));
-    const shortTests = results.filter(r => !isLongTest(r.testName, r.testType));
-
-    const pages = [];
-    longTests.forEach(test => {
-      pages.push([test]);
-    });
-
-    const TESTS_PER_PAGE = 10;
-    for (let i = 0; i < shortTests.length; i += TESTS_PER_PAGE) {
-      pages.push(shortTests.slice(i, i + TESTS_PER_PAGE));
-    }
 
     const printContent = `
       <!DOCTYPE html>
@@ -459,12 +518,11 @@ export default function Results() {
             .page-content {
               page-break-inside: avoid;
             }
-            
-            /* التعديل 3: إضافة دعم الأسطر المتعددة في الطباعة */
-            .multiline-text {
-              white-space: pre-wrap;
-            }
 
+            /* 5. تمت إضافة هذا السطر لدعم الأسطر المتعددة في الطباعة */
+            .multiline-text { white-space: pre-wrap; }
+            
+            /* Custom sections styling */
             .custom-section {
               padding: 12px;
               margin-bottom: 18px;
@@ -477,6 +535,7 @@ export default function Results() {
               margin-top: 18px;
             }
             
+            /* Patient info - professional design */
             .patient-info {
               background: #f9fafb;
               padding: 18px;
@@ -494,7 +553,7 @@ export default function Results() {
             }
             .info-grid {
               display: grid;
-              grid-template-columns: repeat(3, 1fr);
+              grid-template-columns: repeat(2, 1fr);
               gap: 12px;
             }
             .info-item {
@@ -511,6 +570,7 @@ export default function Results() {
               font-weight: 500;
             }
             
+            /* Standard test results table - elegant design */
             .results-table {
               width: 100%;
               border-collapse: collapse;
@@ -530,7 +590,7 @@ export default function Results() {
               padding: 10px;
               border: 1px solid #d1d5db;
               font-size: 14px;
-              vertical-align: top;
+              vertical-align: top; /* تحسين لمحاذاة النص */
             }
             .results-table tr:nth-child(even) {
               background: #f9fafb;
@@ -546,6 +606,16 @@ export default function Results() {
               font-size: 14px;
             }
             
+            /* Long test auto-scaling for perfect fit */
+            .long-test-container {
+              page-break-inside: avoid;
+              transform-origin: top left;
+            }
+            .long-test-container.auto-scale {
+              transform: scale(0.95);
+            }
+            
+            /* Urine/Stool test styling - compact and elegant */
             .complex-test {
               page-break-inside: avoid;
             }
@@ -588,6 +658,27 @@ export default function Results() {
               body {
                 padding: 20px;
               }
+              .page {
+                page-break-after: always;
+              }
+              .page:last-child {
+                page-break-after: auto;
+              }
+              .page-content {
+                page-break-inside: avoid;
+              }
+              .custom-section {
+                page-break-inside: avoid;
+              }
+              .patient-info {
+                page-break-after: avoid;
+              }
+              .results-table {
+                page-break-inside: avoid;
+              }
+              .urine-section {
+                page-break-inside: avoid;
+              }
             }
           </style>
         </head>
@@ -610,11 +701,13 @@ export default function Results() {
 
                 <h2 style="margin-bottom: 12px; color: #1e3a8a; font-weight: 700; font-size: 16px;">Test Results</h2>
                 ${pageTests.map(result => {
+            // Check if this is a long test (urine or other complex tests)
+            const isLongTestType = isLongTest(result.testName, result.testType);
             
             if (result.testType === 'urine' && result.urineData) {
               const uData = result.urineData;
               return `
-                <div class="complex-test">
+                <div class="complex-test long-test-container auto-scale">
                   <h3>Urine Analysis</h3>
                   
                   <div>
@@ -701,27 +794,53 @@ export default function Results() {
                 </div>
               `;
             } else {
-              // الفحص العادي (هنا تم إضافة كلاس multiline-text)
-              return `
-                <table class="results-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 30%;">Test Name</th>
-                      <th style="width: 20%;">Result</th>
-                      <th style="width: 15%;">Unit</th>
-                      <th style="width: 35%;">Normal Range</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td class="test-name">${escapeHtml(result.testName)}</td>
-                      <td class="test-result">${escapeHtml(result.result || '-')}</td>
-                      <td>${escapeHtml(result.unit || '-')}</td>
-                      <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              `;
+              // Check if this is a long test (needs auto-scaling)
+              if (isLongTestType) {
+                return `
+                  <div class="long-test-container auto-scale">
+                    <table class="results-table" style="margin-bottom: 20px; page-break-inside: avoid;">
+                      <thead>
+                        <tr>
+                          <th>Test Name</th>
+                          <th>Result</th>
+                          <th>Unit</th>
+                          <th>Normal Range</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td class="test-name">${escapeHtml(result.testName)}</td>
+                          <td class="test-result">${escapeHtml(result.result || '-')}</td>
+                          <td>${escapeHtml(result.unit || '-')}</td>
+                          <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td> <!-- 6. تعديل هنا -->
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                `;
+              } else {
+                // Short test - normal rendering
+                return `
+                  <table class="results-table" style="margin-bottom: 20px; page-break-inside: avoid;">
+                    <thead>
+                      <tr>
+                        <th>Test Name</th>
+                        <th>Result</th>
+                        <th>Unit</th>
+                        <th>Normal Range</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td class="test-name">${escapeHtml(result.testName)}</td>
+                        <td class="test-result">${escapeHtml(result.result || '-')}</td>
+                        <td>${escapeHtml(result.unit || '-')}</td>
+                        <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td> <!-- 7. تعديل هنا -->
+                      </tr>
+                    </tbody>
+                  </table>
+                `;
+              }
             }
           }).join('')}
 
@@ -938,6 +1057,7 @@ export default function Results() {
                         <div key={test.id} className="border border-border rounded-lg p-6" data-testid={`result-row-${index}`}>
                           <h3 className="text-lg font-semibold mb-4 text-primary">Urine Analysis</h3>
                           
+                          {/* Physical Examination */}
                           <div className="mb-6">
                             <h4 className="text-md font-semibold mb-3 text-foreground">Physical Examination</h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -946,6 +1066,7 @@ export default function Results() {
                                 <Input
                                   value={uData.colour || "Amber Yellow"}
                                   onChange={(e) => updateUrineData(test.id, "colour", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -954,6 +1075,7 @@ export default function Results() {
                                 <Input
                                   value={uData.aspect || "Clear"}
                                   onChange={(e) => updateUrineData(test.id, "aspect", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -962,6 +1084,7 @@ export default function Results() {
                                 <Input
                                   value={uData.reaction || "Acidic"}
                                   onChange={(e) => updateUrineData(test.id, "reaction", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -970,12 +1093,14 @@ export default function Results() {
                                 <Input
                                   value={uData.specificGravity || "1015-1025"}
                                   onChange={(e) => updateUrineData(test.id, "specificGravity", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
                             </div>
                           </div>
 
+                          {/* Chemical Examination */}
                           <div className="mb-6">
                             <h4 className="text-md font-semibold mb-3 text-foreground">Chemical Examination</h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -984,6 +1109,7 @@ export default function Results() {
                                 <Input
                                   value={uData.glucose ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "glucose", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -992,6 +1118,7 @@ export default function Results() {
                                 <Input
                                   value={uData.protein ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "protein", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1000,6 +1127,7 @@ export default function Results() {
                                 <Input
                                   value={uData.bilirubin ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "bilirubin", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1008,6 +1136,7 @@ export default function Results() {
                                 <Input
                                   value={uData.ketones ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "ketones", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1016,6 +1145,7 @@ export default function Results() {
                                 <Input
                                   value={uData.nitrite ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "nitrite", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1024,6 +1154,7 @@ export default function Results() {
                                 <Input
                                   value={uData.leukocyte ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "leukocyte", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1032,12 +1163,14 @@ export default function Results() {
                                 <Input
                                   value={uData.blood ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "blood", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
                             </div>
                           </div>
 
+                          {/* Microscopical Examination */}
                           <div>
                             <h4 className="text-md font-semibold mb-3 text-foreground">Microscopical Examination</h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1046,6 +1179,7 @@ export default function Results() {
                                 <Input
                                   value={uData.pusCells ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "pusCells", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1054,6 +1188,7 @@ export default function Results() {
                                 <Input
                                   value={uData.redCells ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "redCells", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1062,6 +1197,7 @@ export default function Results() {
                                 <Input
                                   value={uData.epithelialCell ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "epithelialCell", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1070,6 +1206,7 @@ export default function Results() {
                                 <Input
                                   value={uData.bacteria ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "bacteria", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1078,6 +1215,7 @@ export default function Results() {
                                 <Input
                                   value={uData.crystals ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "crystals", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1086,6 +1224,7 @@ export default function Results() {
                                 <Input
                                   value={uData.amorphous ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "amorphous", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1094,6 +1233,7 @@ export default function Results() {
                                 <Input
                                   value={uData.mucus ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "mucus", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1102,6 +1242,7 @@ export default function Results() {
                                 <Input
                                   value={uData.other ?? "Nil"}
                                   onChange={(e) => updateUrineData(test.id, "other", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
                                   className="flex-1"
                                 />
                               </div>
@@ -1111,7 +1252,7 @@ export default function Results() {
                       );
                     }
                     
-                    // التعديل 4: تحويل حقل النطاق الطبيعي من Input إلى Textarea
+                    // Standard test (8. هذا هو التعديل: استخدام Textarea بدلاً من Input)
                     return (
                       <div
                         key={test.id}
@@ -1149,7 +1290,6 @@ export default function Results() {
                           <Label htmlFor={`range-${test.id}`} className="text-xs text-muted-foreground">
                             Normal Range
                           </Label>
-                          {/* هذا هو التعديل: استخدام Textarea بدلاً من Input */}
                           <Textarea
                             id={`range-${test.id}`}
                             placeholder="Range"

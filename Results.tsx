@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea"; // 1. تمت إضافة هذا السطر فقط
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Save, Printer, FileDown, Search, Calendar, ArrowLeft, Settings, Trash2, Plus, X } from "lucide-react";
@@ -11,7 +12,6 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Visit, TestResult, Patient, Setting, CustomPrintSection, Test } from "@shared/schema";
 import { useLocation } from "wouter";
-import { Textarea } from "@/components/ui/textarea"; // تمت الإضافة لدعم الأسطر المتعددة
 import {
   Dialog,
   DialogContent,
@@ -151,7 +151,7 @@ export default function Results() {
     },
   });
 
-  // --- إضافات الحذف الضرورية (يجب أن تبقى ليعمل الحذف) ---
+  // 2. تمت إضافة هذه الأوامر هنا لحل مشكلة الحذف (بدون لمس الباقي)
   const deleteTestResultMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/test-results/${id}`, {}),
   });
@@ -159,7 +159,7 @@ export default function Results() {
   const createTestResultMutation = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/test-results", data),
   });
-  // ---------------------------------------------------------
+  // ------------------------------------------------
 
   const batchUpdateMutation = useMutation({
     mutationFn: (updates: Array<{ id: string; data: Partial<TestResult> }>) =>
@@ -250,12 +250,13 @@ export default function Results() {
         },
       });
 
-      // --- كود الحذف الجديد (مطلوب ليعمل الحذف) ---
+      // --- 3. بداية تعديل الحذف (تمت الإضافة هنا فقط) ---
       const oldTestIds = editingVisit.testIds || [];
       const newTestIds = visitFormData.testIds;
       const addedTestIds = newTestIds.filter(id => !oldTestIds.includes(id));
       const removedTestIds = oldTestIds.filter(id => !newTestIds.includes(id));
 
+      // حذف الفحوصات
       if (removedTestIds.length > 0) {
         const resultsToDelete = results.filter(r => removedTestIds.includes(r.testId));
         for (const res of resultsToDelete) {
@@ -264,6 +265,7 @@ export default function Results() {
         setResults(prev => prev.filter(r => !removedTestIds.includes(r.testId)));
       }
 
+      // إضافة الفحوصات
       for (const testId of addedTestIds) {
         const testDef = allTests?.find(t => t.id === testId);
         if (testDef) {
@@ -288,9 +290,9 @@ export default function Results() {
            await createTestResultMutation.mutateAsync(resultData);
         }
       }
-      // ------------------------------------------
+      // --- نهاية تعديل الحذف ---
 
-      // Update visit data
+      // Update visit data (tests and price)
       await updateVisitMutation.mutateAsync({
         id: editingVisit.id,
         visit: {
@@ -299,6 +301,7 @@ export default function Results() {
         },
       });
 
+      // تحديث القوائم
       await queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
       
@@ -307,7 +310,6 @@ export default function Results() {
         title: "Changes Saved",
         description: "Patient and visit information have been updated successfully",
       });
-
     } catch (error) {
       toast({
         title: "Error",
@@ -340,6 +342,7 @@ export default function Results() {
 
   const saveResults = async () => {
     try {
+      // Prepare all updates
       const updates = results.map((result) => ({
         id: result.id,
         data: {
@@ -350,6 +353,8 @@ export default function Results() {
           urineData: result.testType === "urine" ? result.urineData : undefined,
         },
       }));
+
+      // Send all updates in a single batch request
       await batchUpdateMutation.mutateAsync(updates);
       
       toast({
@@ -371,7 +376,6 @@ export default function Results() {
     return div.innerHTML;
   };
 
-  // --- دالة الطباعة (المعدلة لإضافة التكرار الذكي) ---
   const printResults = async () => {
     if (!selectedVisit || results.length === 0) {
       toast({
@@ -385,7 +389,7 @@ export default function Results() {
     const selectedVisitData = visits?.find(v => v.id === selectedVisit);
     if (!selectedVisitData) return;
 
-    let patientData = currentPatient;
+    let patientData: Patient | null = null;
     try {
       const response = await fetch(`/api/patients/${selectedVisitData.patientId}`);
       if (response.ok) {
@@ -408,7 +412,48 @@ export default function Results() {
     const topSections = customSections.filter(s => s.position === "top" && s.text.trim());
     const bottomSections = customSections.filter(s => s.position === "bottom" && s.text.trim());
 
-    // تجهيز "بلوك" معلومات المريض ليتكرر في كل صفحة
+    // 🎯 Smart Intelligent Pagination System
+    // Define long tests that need their own dedicated page
+    const LONG_TEST_KEYWORDS = [
+      'urine', 'stool', 'culture', 'blood culture', 
+      'urine analysis', 'stool analysis', 'sensitivity'
+    ];
+    
+    const isLongTest = (testName: string, testType?: string): boolean => {
+      if (testType === 'urine') return true;
+      const lowerName = testName.toLowerCase();
+      return LONG_TEST_KEYWORDS.some(keyword => lowerName.includes(keyword));
+    };
+
+    // Classify tests into long and short
+    const longTests = results.filter(r => isLongTest(r.testName, r.testType));
+    const shortTests = results.filter(r => !isLongTest(r.testName, r.testType));
+
+    const pages: Array<typeof results> = [];
+
+    // Each long test gets its own dedicated page
+    longTests.forEach(test => {
+      pages.push([test]);
+    });
+
+    // Group short tests intelligently (max 8 per page for optimal spacing)
+    const TESTS_PER_PAGE = 8;
+    for (let i = 0; i < shortTests.length; i += TESTS_PER_PAGE) {
+      pages.push(shortTests.slice(i, i + TESTS_PER_PAGE));
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast({
+        title: "Print Blocked",
+        description: "Please allow popups to enable printing",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Generate patient info HTML (reused on each page)
+    // 4. تمت إضافة التاريخ هنا في الطباعة
     const patientInfoHTML = `
       <div class="patient-info">
         <h2>Patient Information</h2>
@@ -433,7 +478,7 @@ export default function Results() {
           ` : ''}
           <div class="info-item">
             <span class="info-label">Date:</span>
-            <span class="info-value">${selectedVisitData.visitDate}</span>
+            <span class="info-value" style="font-size: 12px; font-family: monospace;">${selectedVisitData.visitDate}</span>
           </div>
           ${patientData?.phone ? `
           <div class="info-item">
@@ -444,37 +489,6 @@ export default function Results() {
         </div>
       </div>
     `;
-
-    // منطق تقسيم الصفحات
-    const isLongTest = (testName: string, testType?: string): boolean => {
-      if (testType === 'urine') return true;
-      const lowerName = testName.toLowerCase();
-      return ['stool', 'culture', 'sensitivity'].some(k => lowerName.includes(k));
-    };
-
-    const longTests = results.filter(r => isLongTest(r.testName, r.testType));
-    const shortTests = results.filter(r => !isLongTest(r.testName, r.testType));
-
-    const pages = [];
-    
-    // الفحوصات الطويلة (صفحة كاملة لكل فحص)
-    longTests.forEach(test => pages.push([test]));
-
-    // الفحوصات القصيرة (13 فحص في الصفحة)
-    const TESTS_PER_PAGE = 13;
-    for (let i = 0; i < shortTests.length; i += TESTS_PER_PAGE) {
-      pages.push(shortTests.slice(i, i + TESTS_PER_PAGE));
-    }
-
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast({
-        title: "Print Blocked",
-        description: "Please allow popups to enable printing",
-        variant: "destructive",
-      });
-      return;
-    }
 
     const printContent = `
       <!DOCTYPE html>
@@ -490,27 +504,38 @@ export default function Results() {
             }
             body {
               font-family: 'Inter', Arial, sans-serif;
-              padding: 30px;
+              padding: 35px;
               line-height: 1.5;
               color: #1f2937;
               background: #ffffff;
             }
-            /* تنسيق الصفحة */
-            .page-container {
-               page-break-after: always;
-               position: relative;
-               min-height: 95vh;
-               display: flex;
-               flex-direction: column;
+            .page {
+              page-break-after: always;
             }
-            .page-container:last-child {
-               page-break-after: auto;
+            .page:last-child {
+              page-break-after: auto;
+            }
+            .page-content {
+              page-break-inside: avoid;
             }
 
+            /* 5. تمت إضافة هذا السطر لدعم الأسطر المتعددة في الطباعة */
             .multiline-text { white-space: pre-wrap; }
-            .custom-section { padding: 12px; margin-bottom: 18px; border-radius: 4px; }
             
-            /* Patient Info */
+            /* Custom sections styling */
+            .custom-section {
+              padding: 12px;
+              margin-bottom: 18px;
+              border-radius: 4px;
+            }
+            .custom-section.top {
+              margin-bottom: 18px;
+            }
+            .custom-section.bottom {
+              margin-top: 18px;
+            }
+            
+            /* Patient info - professional design */
             .patient-info {
               background: #f9fafb;
               padding: 18px;
@@ -525,8 +550,6 @@ export default function Results() {
               font-weight: 700;
               text-transform: uppercase;
               letter-spacing: 0.5px;
-              border-bottom: 1px solid #e5e7eb; 
-              padding-bottom: 5px;
             }
             .info-grid {
               display: grid;
@@ -547,7 +570,7 @@ export default function Results() {
               font-weight: 500;
             }
             
-            /* Tables */
+            /* Standard test results table - elegant design */
             .results-table {
               width: 100%;
               border-collapse: collapse;
@@ -567,96 +590,271 @@ export default function Results() {
               padding: 10px;
               border: 1px solid #d1d5db;
               font-size: 14px;
-              vertical-align: top;
+              vertical-align: top; /* تحسين لمحاذاة النص */
             }
             .results-table tr:nth-child(even) {
               background: #f9fafb;
             }
+            .test-name {
+              font-weight: 600;
+              color: #1e3a8a;
+            }
+            .test-result {
+              font-family: 'JetBrains Mono', monospace;
+              font-weight: 700;
+              color: #059669;
+              font-size: 14px;
+            }
             
-            /* Urine */
-            .complex-test { margin-top: 20px; }
-            .complex-test h3 { color: #1e3a8a; font-size: 17px; margin-bottom: 12px; border-bottom: 2px solid #1e3a8a; padding-bottom: 4px; font-weight: 700; }
-            .complex-test h4 { color: #1e40af; font-size: 14px; margin-bottom: 8px; margin-top: 15px; font-weight: 600; }
-            .complex-test table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
-            .complex-test td { padding: 6px 8px; border: 1px solid #d1d5db; font-size: 13px; }
-            .complex-test td:nth-child(odd) { font-weight: 600; color: #475569; background: #f9fafb; }
-            .complex-test td:nth-child(even) { color: #059669; font-weight: 600; background: #ffffff; }
-
-            .results-header-title { margin-bottom: 10px; color: #1e3a8a; font-weight: 700; font-size: 16px; margin-top: 10px; }
-
+            /* Long test auto-scaling for perfect fit */
+            .long-test-container {
+              page-break-inside: avoid;
+              transform-origin: top left;
+            }
+            .long-test-container.auto-scale {
+              transform: scale(0.95);
+            }
+            
+            /* Urine/Stool test styling - compact and elegant */
+            .complex-test {
+              page-break-inside: avoid;
+            }
+            .complex-test h3 {
+              color: #1e3a8a;
+              font-size: 17px;
+              margin-bottom: 12px;
+              border-bottom: 2px solid #1e3a8a;
+              padding-bottom: 4px;
+              font-weight: 700;
+            }
+            .complex-test h4 {
+              color: #1e40af;
+              font-size: 14px;
+              margin-bottom: 8px;
+              margin-top: 15px;
+              font-weight: 600;
+            }
+            .complex-test table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 12px;
+            }
+            .complex-test td {
+              padding: 6px 8px;
+              border: 1px solid #d1d5db;
+              font-size: 13px;
+            }
+            .complex-test td:nth-child(odd) {
+              font-weight: 600;
+              color: #475569;
+              background: #f9fafb;
+            }
+            .complex-test td:nth-child(even) {
+              color: #059669;
+              font-weight: 600;
+              background: #ffffff;
+            }
             @media print {
-              body { padding: 20px; }
+              body {
+                padding: 20px;
+              }
+              .page {
+                page-break-after: always;
+              }
+              .page:last-child {
+                page-break-after: auto;
+              }
+              .page-content {
+                page-break-inside: avoid;
+              }
+              .custom-section {
+                page-break-inside: avoid;
+              }
+              .patient-info {
+                page-break-after: avoid;
+              }
+              .results-table {
+                page-break-inside: avoid;
+              }
+              .urine-section {
+                page-break-inside: avoid;
+              }
             }
           </style>
         </head>
         <body>
-          ${pages.map((pageTests, index) => `
-            <div class="page-container">
-               <!-- Header (Repeat on every page) -->
-               ${topSections.map(section => `
-                 <div class="custom-section top" style="text-align: ${section.alignment}; color: ${escapeHtml(section.textColor)}; background-color: ${escapeHtml(section.backgroundColor)}; font-size: ${section.fontSize || 16}px;">
-                   ${escapeHtml(section.text)}
-                 </div>
-               `).join('')}
-               
-               ${patientInfoHTML}
+          ${pages.map((pageTests, pageIndex) => `
+            <div class="page">
+              <div class="page-content">
+                ${topSections.map(section => `
+                  <div class="custom-section top" style="
+                    text-align: ${section.alignment};
+                    color: ${escapeHtml(section.textColor)};
+                    background-color: ${escapeHtml(section.backgroundColor)};
+                    font-size: ${section.fontSize || 16}px;
+                  ">
+                    ${escapeHtml(section.text)}
+                  </div>
+                `).join('')}
+                
+                ${patientInfoHTML}
 
-               <h2 class="results-header-title">Test Results ${pages.length > 1 ? `(Page ${index + 1} of ${pages.length})` : ''}</h2>
-               
-               <div style="flex-grow: 1;">
-               ${pageTests.map(result => {
-                if (result.testType === 'urine' && result.urineData) {
-                  const uData = result.urineData;
-                  return `
-                    <div class="complex-test">
-                      <h3>Urine Analysis</h3>
-                      <div>
-                        <h4>Physical Examination</h4>
-                        <table><tbody>
-                          <tr><td>Colour</td><td>${escapeHtml(uData.colour || '')}</td><td>Aspect</td><td>${escapeHtml(uData.aspect || '')}</td></tr>
-                          <tr><td>Reaction</td><td>${escapeHtml(uData.reaction || '')}</td><td>Specific Gravity</td><td>${escapeHtml(uData.specificGravity || '')}</td></tr>
-                        </tbody></table>
-                      </div>
-                      <div>
-                        <h4>Chemical Examination</h4>
-                        <table><tbody>
-                          <tr><td>Glucose</td><td>${escapeHtml(uData.glucose || '')}</td><td>Protein</td><td>${escapeHtml(uData.protein || '')}</td></tr>
-                          <tr><td>Bilirubin</td><td>${escapeHtml(uData.bilirubin || '')}</td><td>Ketones</td><td>${escapeHtml(uData.ketones || '')}</td></tr>
-                          <tr><td>Nitrite</td><td>${escapeHtml(uData.nitrite || '')}</td><td>Leukocyte</td><td>${escapeHtml(uData.leukocyte || '')}</td></tr>
-                          <tr><td>Blood</td><td colspan="3">${escapeHtml(uData.blood || '')}</td></tr>
-                        </tbody></table>
-                      </div>
-                      <div>
-                        <h4>Microscopical Examination</h4>
-                        <table><tbody>
-                          <tr><td>Pus Cells</td><td>${escapeHtml(uData.pusCells || '')}</td><td>Red Cells</td><td>${escapeHtml(uData.redCells || '')}</td></tr>
-                          <tr><td>Epithelial Cell</td><td>${escapeHtml(uData.epithelialCell || '')}</td><td>Bacteria</td><td>${escapeHtml(uData.bacteria || '')}</td></tr>
-                          <tr><td>Crystals</td><td>${escapeHtml(uData.crystals || '')}</td><td>Amorphous</td><td>${escapeHtml(uData.amorphous || '')}</td></tr>
-                          <tr><td>Mucus</td><td>${escapeHtml(uData.mucus || '')}</td><td>Other</td><td>${escapeHtml(uData.other || '')}</td></tr>
-                        </tbody></table>
-                      </div>
-                    </div>`;
-                } else {
-                  return `
-                    <table class="results-table">
-                      <thead><tr><th>Test Name</th><th>Result</th><th>Unit</th><th>Normal Range</th></tr></thead>
-                      <tbody><tr>
+                <h2 style="margin-bottom: 12px; color: #1e3a8a; font-weight: 700; font-size: 16px;">Test Results</h2>
+                ${pageTests.map(result => {
+            // Check if this is a long test (urine or other complex tests)
+            const isLongTestType = isLongTest(result.testName, result.testType);
+            
+            if (result.testType === 'urine' && result.urineData) {
+              const uData = result.urineData;
+              return `
+                <div class="complex-test long-test-container auto-scale">
+                  <h3>Urine Analysis</h3>
+                  
+                  <div>
+                    <h4>Physical Examination</h4>
+                    <table>
+                      <tbody>
+                        <tr>
+                          <td>Colour</td>
+                          <td>${escapeHtml(uData.colour || 'Amber Yellow')}</td>
+                          <td>Aspect</td>
+                          <td>${escapeHtml(uData.aspect || 'Clear')}</td>
+                        </tr>
+                        <tr>
+                          <td>Reaction</td>
+                          <td>${escapeHtml(uData.reaction || 'Acidic')}</td>
+                          <td>Specific Gravity</td>
+                          <td>${escapeHtml(uData.specificGravity || '1015-1025')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div>
+                    <h4>Chemical Examination</h4>
+                    <table>
+                      <tbody>
+                        <tr>
+                          <td>Glucose</td>
+                          <td>${escapeHtml(uData.glucose || 'Nil')}</td>
+                          <td>Protein</td>
+                          <td>${escapeHtml(uData.protein || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Bilirubin</td>
+                          <td>${escapeHtml(uData.bilirubin || 'Nil')}</td>
+                          <td>Ketones</td>
+                          <td>${escapeHtml(uData.ketones || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Nitrite</td>
+                          <td>${escapeHtml(uData.nitrite || 'Nil')}</td>
+                          <td>Leukocyte</td>
+                          <td>${escapeHtml(uData.leukocyte || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Blood</td>
+                          <td colspan="3">${escapeHtml(uData.blood || 'Nil')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div>
+                    <h4>Microscopical Examination</h4>
+                    <table>
+                      <tbody>
+                        <tr>
+                          <td>Pus Cells</td>
+                          <td>${escapeHtml(uData.pusCells || 'Nil')}</td>
+                          <td>Red Cells</td>
+                          <td>${escapeHtml(uData.redCells || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Epithelial Cell</td>
+                          <td>${escapeHtml(uData.epithelialCell || 'Nil')}</td>
+                          <td>Bacteria</td>
+                          <td>${escapeHtml(uData.bacteria || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Crystals</td>
+                          <td>${escapeHtml(uData.crystals || 'Nil')}</td>
+                          <td>Amorphous</td>
+                          <td>${escapeHtml(uData.amorphous || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Mucus</td>
+                          <td>${escapeHtml(uData.mucus || 'Nil')}</td>
+                          <td>Other</td>
+                          <td>${escapeHtml(uData.other || 'Nil')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              `;
+            } else {
+              // Check if this is a long test (needs auto-scaling)
+              if (isLongTestType) {
+                return `
+                  <div class="long-test-container auto-scale">
+                    <table class="results-table" style="margin-bottom: 20px; page-break-inside: avoid;">
+                      <thead>
+                        <tr>
+                          <th>Test Name</th>
+                          <th>Result</th>
+                          <th>Unit</th>
+                          <th>Normal Range</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td class="test-name">${escapeHtml(result.testName)}</td>
+                          <td class="test-result">${escapeHtml(result.result || '-')}</td>
+                          <td>${escapeHtml(result.unit || '-')}</td>
+                          <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td> <!-- 6. تعديل هنا -->
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                `;
+              } else {
+                // Short test - normal rendering
+                return `
+                  <table class="results-table" style="margin-bottom: 20px; page-break-inside: avoid;">
+                    <thead>
+                      <tr>
+                        <th>Test Name</th>
+                        <th>Result</th>
+                        <th>Unit</th>
+                        <th>Normal Range</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
                         <td class="test-name">${escapeHtml(result.testName)}</td>
                         <td class="test-result">${escapeHtml(result.result || '-')}</td>
                         <td>${escapeHtml(result.unit || '-')}</td>
-                        <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td>
-                      </tr></tbody>
-                    </table>`;
-                }
-               }).join('')}
-               </div>
+                        <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td> <!-- 7. تعديل هنا -->
+                      </tr>
+                    </tbody>
+                  </table>
+                `;
+              }
+            }
+          }).join('')}
 
-               <!-- Footer (Repeat on every page) -->
-               ${bottomSections.map(section => `
-                 <div class="custom-section bottom" style="text-align: ${section.alignment}; color: ${escapeHtml(section.textColor)}; background-color: ${escapeHtml(section.backgroundColor)}; font-size: ${section.fontSize || 16}px;">
-                   ${escapeHtml(section.text)}
-                 </div>
-               `).join('')}
+                ${bottomSections.map(section => `
+                  <div class="custom-section bottom" style="
+                    text-align: ${section.alignment};
+                    color: ${escapeHtml(section.textColor)};
+                    background-color: ${escapeHtml(section.backgroundColor)};
+                    font-size: ${section.fontSize || 16}px;
+                  ">
+                    ${escapeHtml(section.text)}
+                  </div>
+                `).join('')}
+              </div>
             </div>
           `).join('')}
         </body>
@@ -1054,7 +1252,7 @@ export default function Results() {
                       );
                     }
                     
-                    // Standard test
+                    // Standard test (8. هذا هو التعديل: استخدام Textarea بدلاً من Input)
                     return (
                       <div
                         key={test.id}
@@ -1107,6 +1305,12 @@ export default function Results() {
                 </div>
               </CardContent>
             </Card>
+          )}
+
+          {!selectedVisit && (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">Select a patient to enter test results</p>
+            </div>
           )}
         </div>
 

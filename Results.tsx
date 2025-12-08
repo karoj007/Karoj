@@ -42,6 +42,7 @@ export default function Results() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
+  
   const [patientFormData, setPatientFormData] = useState({
     name: "",
     age: "",
@@ -49,10 +50,12 @@ export default function Results() {
     phone: "",
     source: "",
   });
+  
   const [visitFormData, setVisitFormData] = useState({
     testIds: [] as string[],
     totalCost: 0,
   });
+  
   const { toast } = useToast();
 
   const { data: visits } = useQuery<Visit[]>({
@@ -162,6 +165,7 @@ export default function Results() {
       toast({ title: "Error", description: "Please select a patient first", variant: "destructive" });
       return;
     }
+    
     const visit = visits?.find(v => v.id === selectedVisit);
     if (!visit || !currentPatient) return;
     
@@ -185,6 +189,7 @@ export default function Results() {
     if (!editingPatient || !editingVisit) return;
     
     try {
+      // Update patient info
       await updatePatientMutation.mutateAsync({
         id: editingPatient.id,
         patient: {
@@ -196,11 +201,13 @@ export default function Results() {
         },
       });
 
+      // Handle Test Changes (Add/Remove)
       const oldTestIds = editingVisit.testIds || [];
       const newTestIds = visitFormData.testIds;
       const addedTestIds = newTestIds.filter(id => !oldTestIds.includes(id));
       const removedTestIds = oldTestIds.filter(id => !newTestIds.includes(id));
 
+      // Remove tests
       if (removedTestIds.length > 0) {
         const resultsToDelete = results.filter(r => removedTestIds.includes(r.testId));
         for (const res of resultsToDelete) {
@@ -209,6 +216,7 @@ export default function Results() {
         setResults(prev => prev.filter(r => !removedTestIds.includes(r.testId)));
       }
 
+      // Add tests
       for (const testId of addedTestIds) {
         const testDef = allTests?.find(t => t.id === testId);
         if (testDef) {
@@ -234,6 +242,7 @@ export default function Results() {
         }
       }
 
+      // Update visit
       await updateVisitMutation.mutateAsync({
         id: editingVisit.id,
         visit: {
@@ -244,7 +253,8 @@ export default function Results() {
 
       await queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
-      
+      await queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
+
       setEditDialogOpen(false);
       toast({ title: "Saved", description: "Changes updated successfully" });
     } catch (error) {
@@ -297,63 +307,81 @@ export default function Results() {
     return div.innerHTML;
   };
 
+  // --- دالة الطباعة الذكية (Smart Pagination) ---
   const printResults = () => {
     if (!selectedVisit || results.length === 0) {
-      toast({ title: "No Data", description: "Please select a patient with test results to print", variant: "destructive" });
+      toast({
+        title: "No Data",
+        description: "Please select a patient with test results to print",
+        variant: "destructive",
+      });
       return;
     }
 
     const selectedVisitData = visits?.find(v => v.id === selectedVisit);
     if (!selectedVisitData) return;
-    const patientData = currentPatient;
+    
+    let patientData = currentPatient;
 
     let customSections: CustomPrintSection[] = [];
     try {
       const customSectionsSetting = settings?.find((s) => s.key === "customPrintSections");
-      if (customSectionsSetting) customSections = JSON.parse(customSectionsSetting.value);
-    } catch (e) { customSections = []; }
-    const topSections = customSections.filter(s => s.position === "top");
-    const bottomSections = customSections.filter(s => s.position === "bottom");
+      if (customSectionsSetting) {
+        customSections = JSON.parse(customSectionsSetting.value);
+      }
+    } catch (e) {
+      customSections = [];
+    }
+
+    const topSections = customSections.filter(s => s.position === "top" && s.text.trim());
+    const bottomSections = customSections.filter(s => s.position === "bottom" && s.text.trim());
 
     const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
+    if (!printWindow) {
+      toast({
+        title: "Print Blocked",
+        description: "Please allow popups to enable printing",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    // Patient Info Generator (With Date) - Will be reused on every page
-    const getPatientInfoHTML = () => `
+    // هنا يتم تجميع معلومات المريض في "قالب" ليتم تكراره
+    const patientHeaderHTML = `
       <div class="patient-info">
         <h2>Patient Information</h2>
         <div class="info-grid">
           ${patientData?.name ? `<div class="info-item"><span class="info-label">Name:</span><span class="info-value">${escapeHtml(patientData.name)}</span></div>` : ''}
           ${patientData?.age ? `<div class="info-item"><span class="info-label">Age:</span><span class="info-value">${patientData.age}</span></div>` : ''}
           ${patientData?.gender ? `<div class="info-item"><span class="info-label">Gender:</span><span class="info-value">${escapeHtml(patientData.gender)}</span></div>` : ''}
-          <div class="info-item"><span class="info-label">Date:</span><span class="info-value" style="font-size: 12px; font-family: monospace;">${selectedVisitData.visitDate}</span></div>
+          <div class="info-item"><span class="info-label">Date:</span><span class="info-value" style="font-family:monospace;">${selectedVisitData.visitDate}</span></div>
           ${patientData?.phone ? `<div class="info-item"><span class="info-label">Phone:</span><span class="info-value">${escapeHtml(patientData.phone)}</span></div>` : ''}
         </div>
       </div>
     `;
 
-    // Pagination Logic:
-    // 1. Long tests (Urine, Stool) get their own pages.
-    // 2. Short tests are grouped (e.g., 10 per page).
+    // تصنيف الفحوصات لتقسيم الصفحات
     const isLongTest = (testName: string, testType?: string) => {
       if (testType === 'urine') return true;
       const lower = testName.toLowerCase();
       return ['stool', 'culture', 'sensitivity'].some(k => lower.includes(k));
     };
 
-    const pages = [];
     const longTests = results.filter(r => isLongTest(r.testName, r.testType));
     const shortTests = results.filter(r => !isLongTest(r.testName, r.testType));
 
+    const pages = [];
+    
+    // كل فحص طويل (مثل اليورين) في صفحة منفصلة
     longTests.forEach(test => pages.push([test]));
 
-    // Group short tests (Adjust 10 if needed to fit paper)
-    const TESTS_PER_PAGE = 10;
+    // الفحوصات القصيرة: كل 13 فحص في صفحة (يمكنك تغيير الرقم 13)
+    const TESTS_PER_PAGE = 13;
     for (let i = 0; i < shortTests.length; i += TESTS_PER_PAGE) {
       pages.push(shortTests.slice(i, i + TESTS_PER_PAGE));
     }
 
-    const printContent = `
+    const htmlContent = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -361,91 +389,130 @@ export default function Results() {
           <title>Test Results - ${selectedVisitData.patientName}</title>
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Inter', Arial, sans-serif; padding: 20px; color: #1f2937; background: #ffffff; }
-            .page-break { page-break-after: always; padding: 20px 0; }
-            .page-break:last-child { page-break-after: auto; }
-            .multiline-text { white-space: pre-wrap; }
-            .custom-section { padding: 10px; margin-bottom: 10px; }
+            body { font-family: 'Inter', Arial, sans-serif; padding: 25px; line-height: 1.5; color: #1f2937; background: #ffffff; }
             
-            /* Patient Info Style */
+            /* Page Break Logic */
+            .page-container { 
+               page-break-after: always; 
+               position: relative;
+               min-height: 95vh;
+               display: flex;
+               flex-direction: column;
+            }
+            .page-container:last-child { page-break-after: auto; }
+            
+            .multiline-text { white-space: pre-wrap; }
+            
+            /* Styles from Original Code */
+            .custom-section { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
+            
             .patient-info { background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #e5e7eb; }
-            .patient-info h2 { font-size: 16px; margin-bottom: 10px; color: #1e3a8a; border-bottom: 1px solid #e5e7eb; padding-bottom: 5px; font-weight: 700; }
+            .patient-info h2 { font-size: 16px; margin-bottom: 10px; color: #1e3a8a; font-weight: 700; border-bottom: 1px solid #e5e7eb; padding-bottom: 5px; }
             .info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-            .info-item { display: flex; gap: 5px; font-size: 13px; }
+            .info-item { display: flex; gap: 6px; font-size: 13px; }
             .info-label { font-weight: 600; color: #64748b; }
             .info-value { color: #1f2937; font-weight: 500; }
             
-            /* Table Style */
             .results-table { width: 100%; border-collapse: collapse; margin-top: 10px; border: 1px solid #d1d5db; }
-            .results-table th { background: #1e3a8a; color: white; padding: 8px; text-align: left; font-size: 13px; }
+            .results-table th { background: #1e3a8a; color: #ffffff; padding: 8px; text-align: left; font-weight: 600; font-size: 13px; border: 1px solid #d1d5db; }
             .results-table td { padding: 8px; border: 1px solid #d1d5db; font-size: 13px; vertical-align: top; }
             .results-table tr:nth-child(even) { background: #f9fafb; }
             
-            /* Urine Style */
-            .complex-test h3 { color: #1e3a8a; border-bottom: 2px solid #1e3a8a; margin-bottom: 10px; font-size: 16px; }
-            .complex-test table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 12px; }
-            .complex-test td { padding: 5px; border: 1px solid #d1d5db; }
-            .complex-test td:nth-child(odd) { background: #f3f4f6; font-weight: 600; width: 25%; }
+            .complex-test { margin-top: 10px; }
+            .complex-test h3 { color: #1e3a8a; font-size: 16px; margin-bottom: 10px; border-bottom: 2px solid #1e3a8a; padding-bottom: 4px; font-weight: 700; }
+            .complex-test table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+            .complex-test td { padding: 5px; border: 1px solid #d1d5db; font-size: 12px; }
+            .complex-test td:nth-child(odd) { font-weight: 600; color: #475569; background: #f9fafb; width: 20%; }
+            
+            .results-header-title { margin-bottom: 10px; color: #1e3a8a; font-weight: 700; font-size: 16px; margin-top: 10px; }
+
             @media print { body { padding: 0; } }
           </style>
         </head>
         <body>
-          ${pages.map(pageTests => `
-            <div class="page-break">
-              ${topSections.map(s => `<div class="custom-section" style="text-align:${s.alignment};color:${s.textColor};font-size:${s.fontSize}px">${s.text}</div>`).join('')}
-              
-              ${getPatientInfoHTML()}
-              
-              <h2 style="margin-bottom: 10px; color: #1e3a8a; font-size: 16px; font-weight: 700;">Test Results</h2>
-              
-              ${pageTests.map(result => {
-                 if (result.testType === 'urine' && result.urineData) {
-                   const u = result.urineData;
-                   return `
-                    <div class="complex-test">
-                      <h3>Urine Analysis</h3>
-                      <table>
-                        <tr><td>Colour</td><td>${u.colour}</td><td>Aspect</td><td>${u.aspect}</td></tr>
-                        <tr><td>Reaction</td><td>${u.reaction}</td><td>Specific Gravity</td><td>${u.specificGravity}</td></tr>
-                      </table>
-                      <table style="margin-top:5px">
-                        <tr><td>Glucose</td><td>${u.glucose}</td><td>Protein</td><td>${u.protein}</td></tr>
-                        <tr><td>Bilirubin</td><td>${u.bilirubin}</td><td>Ketones</td><td>${u.ketones}</td></tr>
-                        <tr><td>Nitrite</td><td>${u.nitrite}</td><td>Leukocyte</td><td>${u.leukocyte}</td></tr>
-                        <tr><td>Blood</td><td>${u.blood}</td><td></td><td></td></tr>
-                      </table>
-                      <table style="margin-top:5px">
-                        <tr><td>Pus Cells</td><td>${u.pusCells}</td><td>Red Cells</td><td>${u.redCells}</td></tr>
-                        <tr><td>Epithelial</td><td>${u.epithelialCell}</td><td>Bacteria</td><td>${u.bacteria}</td></tr>
-                        <tr><td>Crystals</td><td>${u.crystals}</td><td>Amorphous</td><td>${u.amorphous}</td></tr>
-                        <tr><td>Mucus</td><td>${u.mucus}</td><td>Other</td><td>${u.other}</td></tr>
-                      </table>
-                    </div>`;
-                 } else {
-                   return `
-                    <table class="results-table">
-                      <thead><tr><th style="width:30%">Test Name</th><th style="width:20%">Result</th><th style="width:15%">Unit</th><th style="width:35%">Normal Range</th></tr></thead>
-                      <tbody><tr>
-                        <td style="font-weight:600; color:#1e3a8a">${escapeHtml(result.testName)}</td>
-                        <td style="font-weight:700; color:#059669">${escapeHtml(result.result || '-')}</td>
-                        <td>${escapeHtml(result.unit || '-')}</td>
-                        <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td>
-                      </tr></tbody>
-                    </table>`;
-                 }
-              }).join('')}
+          ${pages.map((pageTests, index) => `
+            <div class="page-container">
+               <!-- Top Custom Sections -->
+               ${topSections.map(s => `
+                 <div class="custom-section" style="text-align:${s.alignment};color:${s.textColor};background:${s.backgroundColor};font-size:${s.fontSize}px">
+                   ${escapeHtml(s.text)}
+                 </div>
+               `).join('')}
+               
+               <!-- REPEATING HEADER: This appears on every page -->
+               ${patientHeaderHTML}
 
-              ${bottomSections.map(s => `<div class="custom-section" style="text-align:${s.alignment};color:${s.textColor};font-size:${s.fontSize}px">${s.text}</div>`).join('')}
+               <h2 class="results-header-title">Test Results ${pages.length > 1 ? `(Page ${index + 1} of ${pages.length})` : ''}</h2>
+               
+               <div style="flex-grow: 1;">
+                 ${pageTests.map(result => {
+                    if (result.testType === 'urine' && result.urineData) {
+                      const u = result.urineData;
+                      return `
+                       <div class="complex-test">
+                         <h3>Urine Analysis</h3>
+                         <!-- Physical -->
+                         <div>
+                           <h4>Physical Examination</h4>
+                           <table><tbody>
+                             <tr><td>Colour</td><td>${escapeHtml(u.colour || '')}</td><td>Aspect</td><td>${escapeHtml(u.aspect || '')}</td></tr>
+                             <tr><td>Reaction</td><td>${escapeHtml(u.reaction || '')}</td><td>Specific Gravity</td><td>${escapeHtml(u.specificGravity || '')}</td></tr>
+                           </tbody></table>
+                         </div>
+                         <!-- Chemical -->
+                         <div>
+                           <h4>Chemical Examination</h4>
+                           <table><tbody>
+                             <tr><td>Glucose</td><td>${escapeHtml(u.glucose || '')}</td><td>Protein</td><td>${escapeHtml(u.protein || '')}</td></tr>
+                             <tr><td>Bilirubin</td><td>${escapeHtml(u.bilirubin || '')}</td><td>Ketones</td><td>${escapeHtml(u.ketones || '')}</td></tr>
+                             <tr><td>Nitrite</td><td>${escapeHtml(u.nitrite || '')}</td><td>Leukocyte</td><td>${escapeHtml(u.leukocyte || '')}</td></tr>
+                             <tr><td>Blood</td><td colspan="3">${escapeHtml(u.blood || '')}</td></tr>
+                           </tbody></table>
+                         </div>
+                         <!-- Micro -->
+                         <div>
+                           <h4>Microscopical Examination</h4>
+                           <table><tbody>
+                             <tr><td>Pus Cells</td><td>${escapeHtml(u.pusCells || '')}</td><td>Red Cells</td><td>${escapeHtml(u.redCells || '')}</td></tr>
+                             <tr><td>Epith. Cell</td><td>${escapeHtml(u.epithelialCell || '')}</td><td>Bacteria</td><td>${escapeHtml(u.bacteria || '')}</td></tr>
+                             <tr><td>Crystals</td><td>${escapeHtml(u.crystals || '')}</td><td>Amorphous</td><td>${escapeHtml(u.amorphous || '')}</td></tr>
+                             <tr><td>Mucus</td><td>${escapeHtml(u.mucus || '')}</td><td>Other</td><td>${escapeHtml(u.other || '')}</td></tr>
+                           </tbody></table>
+                         </div>
+                       </div>`;
+                    } else {
+                      return `
+                       <table class="results-table">
+                         <thead><tr><th style="width:30%">Test Name</th><th style="width:20%">Result</th><th style="width:15%">Unit</th><th style="width:35%">Normal Range</th></tr></thead>
+                         <tbody><tr>
+                           <td style="color:#1e3a8a; font-weight:600">${escapeHtml(result.testName)}</td>
+                           <td style="color:#059669; font-weight:700">${escapeHtml(result.result || '-')}</td>
+                           <td>${escapeHtml(result.unit || '-')}</td>
+                           <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td>
+                         </tr></tbody>
+                       </table>`;
+                    }
+                 }).join('')}
+               </div>
+
+               <!-- Bottom Custom Sections -->
+               ${bottomSections.map(s => `
+                 <div class="custom-section" style="text-align:${s.alignment};color:${s.textColor};background:${s.backgroundColor};font-size:${s.fontSize}px">
+                   ${escapeHtml(s.text)}
+                 </div>
+               `).join('')}
             </div>
           `).join('')}
         </body>
       </html>
     `;
-    
+
     printWindow.document.write(printContent);
     printWindow.document.close();
     printWindow.focus();
-    setTimeout(() => printWindow.print(), 500);
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
   };
 
   const exportPDF = () => {
@@ -453,7 +520,9 @@ export default function Results() {
     setTimeout(printResults, 500);
   };
 
-  const filteredVisits = visits?.filter((v) => v.patientName.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredVisits = visits?.filter((v) =>
+    v.patientName.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="min-h-screen bg-background p-4 sm:p-6 lg:p-8">
@@ -468,37 +537,57 @@ export default function Results() {
           description="Enter and manage patient test results"
           actions={
             <>
-              <Button variant="outline" onClick={printResults} className="gap-2"><Printer className="h-4 w-4" /> Print</Button>
-              <Button variant="outline" onClick={exportPDF} className="gap-2"><FileDown className="h-4 w-4" /> Save PDF</Button>
-              <Button onClick={saveResults} className="gap-2"><Save className="h-4 w-4" /> Save</Button>
+              <Button variant="outline" onClick={printResults} className="gap-2" data-testid="button-print">
+                <Printer className="h-4 w-4" /> Print
+              </Button>
+              <Button variant="outline" onClick={exportPDF} className="gap-2" data-testid="button-export-pdf">
+                <FileDown className="h-4 w-4" /> Save PDF
+              </Button>
+              <Button onClick={saveResults} className="gap-2" data-testid="button-save-results">
+                <Save className="h-4 w-4" /> Save
+              </Button>
             </>
           }
         />
 
         <div className="space-y-6">
           <Card>
-            <CardHeader><CardTitle>Patient Selection</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>Patient Selection</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Search Patient</Label>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input placeholder="Type patient name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9" />
+                    <Input
+                      placeholder="Type patient name..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9"
+                      data-testid="input-search-patient"
+                    />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Visit Date</Label>
                   <div className="relative">
                     <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="pl-9" />
+                    <Input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                      className="pl-9"
+                      data-testid="input-date"
+                    />
                   </div>
                 </div>
               </div>
               <div className="space-y-2">
                 <Label>Patients</Label>
                 <Select value={selectedVisit} onValueChange={setSelectedVisit}>
-                  <SelectTrigger><SelectValue placeholder="Select a patient" /></SelectTrigger>
+                  <SelectTrigger data-testid="select-patient"><SelectValue placeholder="Select a patient" /></SelectTrigger>
                   <SelectContent>
                     {filteredVisits?.map((visit) => (
                       <SelectItem key={visit.id} value={visit.id}>{visit.patientName} - {visit.visitDate}</SelectItem>
@@ -517,7 +606,9 @@ export default function Results() {
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button variant="ghost" size="icon" onClick={handleEditPatient}><Settings className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" onClick={handleEditPatient} data-testid="button-edit-patient">
+                          <Settings className="h-4 w-4" />
+                        </Button>
                       </TooltipTrigger>
                       <TooltipContent><p>Edit / Delete Patient</p></TooltipContent>
                     </Tooltip>
@@ -536,7 +627,9 @@ export default function Results() {
 
           {selectedVisit && results.length > 0 && (
             <Card>
-              <CardHeader><CardTitle>Test Results Entry</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>Test Results Entry</CardTitle>
+              </CardHeader>
               <CardContent>
                 <div className="space-y-4">
                   {results.map((test, index) => {
@@ -549,14 +642,36 @@ export default function Results() {
                                <Label className="text-xs">Physical</Label>
                                <Input value={test.urineData?.colour} onChange={(e)=>updateUrineData(test.id,'colour',e.target.value)} className="mb-2 h-8" placeholder="Colour" />
                                <Input value={test.urineData?.aspect} onChange={(e)=>updateUrineData(test.id,'aspect',e.target.value)} className="h-8" placeholder="Aspect" />
+                               <Input value={test.urineData?.reaction} onChange={(e)=>updateUrineData(test.id,'reaction',e.target.value)} className="mb-2 h-8" placeholder="Reaction" />
+                               <Input value={test.urineData?.specificGravity} onChange={(e)=>updateUrineData(test.id,'specificGravity',e.target.value)} className="h-8" placeholder="Sp. Gravity" />
                              </div>
                              <div>
-                               <Label className="text-xs">Chemical (Glucose/Protein)</Label>
+                               <Label className="text-xs">Chemical</Label>
                                <Input value={test.urineData?.glucose} onChange={(e)=>updateUrineData(test.id,'glucose',e.target.value)} className="mb-2 h-8" placeholder="Glucose" />
                                <Input value={test.urineData?.protein} onChange={(e)=>updateUrineData(test.id,'protein',e.target.value)} className="h-8" placeholder="Protein" />
+                               <Input value={test.urineData?.bilirubin} onChange={(e)=>updateUrineData(test.id,'bilirubin',e.target.value)} className="mb-2 h-8" placeholder="Bilirubin" />
+                               <Input value={test.urineData?.ketones} onChange={(e)=>updateUrineData(test.id,'ketones',e.target.value)} className="h-8" placeholder="Ketones" />
+                               <Input value={test.urineData?.nitrite} onChange={(e)=>updateUrineData(test.id,'nitrite',e.target.value)} className="mb-2 h-8" placeholder="Nitrite" />
+                               <Input value={test.urineData?.leukocyte} onChange={(e)=>updateUrineData(test.id,'leukocyte',e.target.value)} className="h-8" placeholder="Leukocyte" />
+                               <Input value={test.urineData?.blood} onChange={(e)=>updateUrineData(test.id,'blood',e.target.value)} className="mb-2 h-8" placeholder="Blood" />
                              </div>
                            </div>
-                           <div className="mt-2 text-xs text-muted-foreground text-center">Click print to see full Urine report</div>
+                           <div className="grid grid-cols-2 gap-4 mt-2">
+                             <div>
+                               <Label className="text-xs">Microscopical</Label>
+                               <Input value={test.urineData?.pusCells} onChange={(e)=>updateUrineData(test.id,'pusCells',e.target.value)} className="mb-2 h-8" placeholder="Pus Cells" />
+                               <Input value={test.urineData?.redCells} onChange={(e)=>updateUrineData(test.id,'redCells',e.target.value)} className="h-8" placeholder="Red Cells" />
+                               <Input value={test.urineData?.epithelialCell} onChange={(e)=>updateUrineData(test.id,'epithelialCell',e.target.value)} className="mb-2 h-8" placeholder="Epith. Cell" />
+                               <Input value={test.urineData?.bacteria} onChange={(e)=>updateUrineData(test.id,'bacteria',e.target.value)} className="h-8" placeholder="Bacteria" />
+                             </div>
+                             <div>
+                               <Label className="text-xs">&nbsp;</Label>
+                               <Input value={test.urineData?.crystals} onChange={(e)=>updateUrineData(test.id,'crystals',e.target.value)} className="mb-2 h-8" placeholder="Crystals" />
+                               <Input value={test.urineData?.amorphous} onChange={(e)=>updateUrineData(test.id,'amorphous',e.target.value)} className="h-8" placeholder="Amorphous" />
+                               <Input value={test.urineData?.mucus} onChange={(e)=>updateUrineData(test.id,'mucus',e.target.value)} className="mb-2 h-8" placeholder="Mucus" />
+                               <Input value={test.urineData?.other} onChange={(e)=>updateUrineData(test.id,'other',e.target.value)} className="h-8" placeholder="Other" />
+                             </div>
+                           </div>
                          </div>
                       );
                     }
@@ -567,11 +682,11 @@ export default function Results() {
                         <div className="space-y-2"><Label className="text-xs text-muted-foreground">Unit</Label><Input value={test.unit || ""} onChange={(e) => updateResult(test.id, "unit", e.target.value)} /></div>
                         <div className="space-y-2">
                           <Label className="text-xs text-muted-foreground">Normal Range</Label>
-                          {/* هنا التعديل: Textarea لدعم الأسطر المتعددة في الإدخال */}
+                          {/* Textarea for Multiline Support */}
                           <Textarea 
                             value={test.normalRange || ""} 
                             onChange={(e) => updateResult(test.id, "normalRange", e.target.value)} 
-                            className="min-h-[60px] resize-y"
+                            className="min-h-[60px]"
                           />
                         </div>
                       </div>

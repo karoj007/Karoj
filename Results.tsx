@@ -3,7 +3,6 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea"; 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Save, Printer, FileDown, Search, Calendar, ArrowLeft, Settings, Trash2, Plus, X } from "lucide-react";
@@ -96,6 +95,22 @@ export default function Results() {
   const updatePatientMutation = useMutation({
     mutationFn: (data: { id: string; patient: Partial<Patient> }) =>
       apiRequest("PUT", `/api/patients/${data.id}`, data.patient),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
+      setEditDialogOpen(false);
+      toast({
+        title: "Changes Saved",
+        description: "Patient information has been updated successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update patient information",
+        variant: "destructive",
+      });
+    },
   });
 
   const deletePatientMutation = useMutation({
@@ -107,8 +122,15 @@ export default function Results() {
       setEditDialogOpen(false);
       setSelectedVisit("");
       toast({
-        title: "Deleted",
-        description: "Patient data deleted successfully.",
+        title: "Patient Deleted",
+        description: "Patient and all related data have been permanently deleted",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete patient",
+        variant: "destructive",
       });
     },
   });
@@ -116,14 +138,17 @@ export default function Results() {
   const updateVisitMutation = useMutation({
     mutationFn: (data: { id: string; visit: Partial<Visit> }) =>
       apiRequest("PUT", `/api/visits/${data.id}`, data.visit),
-  });
-
-  const deleteTestResultMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("DELETE", `/api/test-results/${id}`, {}),
-  });
-
-  const createTestResultMutation = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/test-results", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update visit information",
+        variant: "destructive",
+      });
+    },
   });
 
   const batchUpdateMutation = useMutation({
@@ -131,10 +156,7 @@ export default function Results() {
       apiRequest("PUT", "/api/test-results/batch", updates),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
-      toast({
-        title: "Saved",
-        description: "Results saved successfully",
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/tests"] });
     },
   });
 
@@ -159,12 +181,32 @@ export default function Results() {
 
   const handleEditPatient = () => {
     if (!selectedVisit) {
-      toast({ title: "Error", description: "Please select a patient first", variant: "destructive" });
+      toast({
+        title: "Error",
+        description: "Please select a patient first",
+        variant: "destructive",
+      });
       return;
     }
     
     const visit = visits?.find(v => v.id === selectedVisit);
-    if (!visit || !currentPatient) return;
+    if (!visit) {
+      toast({
+        title: "Error",
+        description: "Visit not found",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!currentPatient) {
+      toast({
+        title: "Patient Not Found",
+        description: "The patient record for this visit could not be found. It may have been deleted.",
+        variant: "destructive",
+      });
+      return;
+    }
     
     setEditingPatient(currentPatient);
     setEditingVisit(visit);
@@ -186,71 +228,38 @@ export default function Results() {
     if (!editingPatient || !editingVisit) return;
     
     try {
+      // Update patient data
+      const updatedPatientData: Partial<Patient> = {
+        name: patientFormData.name,
+        age: patientFormData.age ? parseInt(patientFormData.age) : undefined,
+        gender: patientFormData.gender || undefined,
+        phone: patientFormData.phone || undefined,
+        source: patientFormData.source || undefined,
+      };
+
       await updatePatientMutation.mutateAsync({
         id: editingPatient.id,
-        patient: {
-          name: patientFormData.name,
-          age: patientFormData.age ? parseInt(patientFormData.age) : undefined,
-          gender: patientFormData.gender,
-          phone: patientFormData.phone,
-          source: patientFormData.source,
-        },
+        patient: updatedPatientData,
       });
 
-      const oldTestIds = editingVisit.testIds || [];
-      const newTestIds = visitFormData.testIds;
-      const addedTestIds = newTestIds.filter(id => !oldTestIds.includes(id));
-      const removedTestIds = oldTestIds.filter(id => !newTestIds.includes(id));
-
-      if (removedTestIds.length > 0) {
-        const resultsToDelete = results.filter(r => removedTestIds.includes(r.testId));
-        for (const res of resultsToDelete) {
-           await deleteTestResultMutation.mutateAsync(res.id);
-        }
-        setResults(prev => prev.filter(r => !removedTestIds.includes(r.testId)));
-      }
-
-      for (const testId of addedTestIds) {
-        const testDef = allTests?.find(t => t.id === testId);
-        if (testDef) {
-           const resultData: any = {
-              visitId: editingVisit.id,
-              testId: testDef.id,
-              testName: testDef.name,
-              price: testDef.price,
-              unit: testDef.unit,
-              normalRange: testDef.normalRange,
-              testType: testDef.testType || "standard",
-           };
-           if (testDef.testType === "urine") {
-              resultData.urineData = {
-                colour: "Amber Yellow", aspect: "Clear", reaction: "Acidic",
-                specificGravity: "1015-1025", glucose: "Nil", protein: "Nil",
-                bilirubin: "Nil", ketones: "Nil", nitrite: "Nil", leukocyte: "Nil",
-                blood: "Nil", pusCells: "Nil", redCells: "Nil", epithelialCell: "Nil",
-                bacteria: "Nil", crystals: "Nil", amorphous: "Nil", mucus: "Nil", other: "Nil"
-              };
-           }
-           await createTestResultMutation.mutateAsync(resultData);
-        }
-      }
+      // Update visit data (tests and price)
+      const updatedVisitData: Partial<Visit> = {
+        testIds: visitFormData.testIds,
+        totalCost: visitFormData.totalCost,
+      };
 
       await updateVisitMutation.mutateAsync({
         id: editingVisit.id,
-        visit: {
-          testIds: visitFormData.testIds,
-          totalCost: visitFormData.totalCost,
-        },
+        visit: updatedVisitData,
       });
 
-      await queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
-      
       setEditDialogOpen(false);
-      toast({ title: "Saved", description: "Changes updated successfully" });
+      toast({
+        title: "Changes Saved",
+        description: "Patient and visit information have been updated successfully",
+      });
     } catch (error) {
-      toast({ title: "Error", description: "Failed to save changes", variant: "destructive" });
+      // Error handling is in the mutations
     }
   };
 
@@ -277,6 +286,7 @@ export default function Results() {
 
   const saveResults = async () => {
     try {
+      // Prepare all updates
       const updates = results.map((result) => ({
         id: result.id,
         data: {
@@ -287,9 +297,20 @@ export default function Results() {
           urineData: result.testType === "urine" ? result.urineData : undefined,
         },
       }));
+
+      // Send all updates in a single batch request
       await batchUpdateMutation.mutateAsync(updates);
-    } catch (e) {
-      toast({ title: "Error", description: "Failed to save results", variant: "destructive" });
+      
+      toast({
+        title: "Results Saved",
+        description: "Test results have been saved successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to save results",
+        variant: "destructive",
+      });
     }
   };
 
@@ -299,8 +320,7 @@ export default function Results() {
     return div.innerHTML;
   };
 
-  // --- دالة الطباعة (المصححة لتعود للشكل القديم) ---
-  const printResults = () => {
+  const printResults = async () => {
     if (!selectedVisit || results.length === 0) {
       toast({
         title: "No Data",
@@ -312,8 +332,16 @@ export default function Results() {
 
     const selectedVisitData = visits?.find(v => v.id === selectedVisit);
     if (!selectedVisitData) return;
-    
-    let patientData = currentPatient;
+
+    let patientData: Patient | null = null;
+    try {
+      const response = await fetch(`/api/patients/${selectedVisitData.patientId}`);
+      if (response.ok) {
+        patientData = await response.json();
+      }
+    } catch (error) {
+      console.error("Error fetching patient data:", error);
+    }
 
     let customSections: CustomPrintSection[] = [];
     try {
@@ -328,6 +356,36 @@ export default function Results() {
     const topSections = customSections.filter(s => s.position === "top" && s.text.trim());
     const bottomSections = customSections.filter(s => s.position === "bottom" && s.text.trim());
 
+    // 🎯 Smart Intelligent Pagination System
+    // Define long tests that need their own dedicated page
+    const LONG_TEST_KEYWORDS = [
+      'urine', 'stool', 'culture', 'blood culture', 
+      'urine analysis', 'stool analysis', 'sensitivity'
+    ];
+    
+    const isLongTest = (testName: string, testType?: string): boolean => {
+      if (testType === 'urine') return true;
+      const lowerName = testName.toLowerCase();
+      return LONG_TEST_KEYWORDS.some(keyword => lowerName.includes(keyword));
+    };
+
+    // Classify tests into long and short
+    const longTests = results.filter(r => isLongTest(r.testName, r.testType));
+    const shortTests = results.filter(r => !isLongTest(r.testName, r.testType));
+
+    const pages: Array<typeof results> = [];
+
+    // Each long test gets its own dedicated page
+    longTests.forEach(test => {
+      pages.push([test]);
+    });
+
+    // Group short tests intelligently (max 8 per page for optimal spacing)
+    const TESTS_PER_PAGE = 8;
+    for (let i = 0; i < shortTests.length; i += TESTS_PER_PAGE) {
+      pages.push(shortTests.slice(i, i + TESTS_PER_PAGE));
+    }
+
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       toast({
@@ -338,36 +396,38 @@ export default function Results() {
       return;
     }
 
-    const patientHeaderHTML = `
+    // Generate patient info HTML (reused on each page)
+    const patientInfoHTML = `
       <div class="patient-info">
         <h2>Patient Information</h2>
         <div class="info-grid">
-          ${patientData?.name ? `<div class="info-item"><span class="info-label">Name:</span><span class="info-value">${escapeHtml(patientData.name)}</span></div>` : ''}
-          ${patientData?.age ? `<div class="info-item"><span class="info-label">Age:</span><span class="info-value">${patientData.age}</span></div>` : ''}
-          ${patientData?.gender ? `<div class="info-item"><span class="info-label">Gender:</span><span class="info-value">${escapeHtml(patientData.gender)}</span></div>` : ''}
-          <div class="info-item"><span class="info-label">Date:</span><span class="info-value" style="font-size: 12px; font-family: monospace;">${selectedVisitData.visitDate}</span></div>
-          ${patientData?.phone ? `<div class="info-item"><span class="info-label">Phone:</span><span class="info-value">${escapeHtml(patientData.phone)}</span></div>` : ''}
+          ${patientData?.name ? `
+          <div class="info-item">
+            <span class="info-label">Name:</span>
+            <span class="info-value">${escapeHtml(patientData.name)}</span>
+          </div>
+          ` : ''}
+          ${patientData?.age ? `
+          <div class="info-item">
+            <span class="info-label">Age:</span>
+            <span class="info-value">${patientData.age}</span>
+          </div>
+          ` : ''}
+          ${patientData?.gender ? `
+          <div class="info-item">
+            <span class="info-label">Gender:</span>
+            <span class="info-value">${escapeHtml(patientData.gender)}</span>
+          </div>
+          ` : ''}
+          ${patientData?.phone ? `
+          <div class="info-item">
+            <span class="info-label">Phone:</span>
+            <span class="info-value">${escapeHtml(patientData.phone)}</span>
+          </div>
+          ` : ''}
         </div>
       </div>
     `;
-
-    const isLongTest = (testName: string, testType?: string) => {
-      if (testType === 'urine') return true;
-      const lower = testName.toLowerCase();
-      return ['stool', 'culture', 'sensitivity'].some(k => lower.includes(k));
-    };
-
-    const longTests = results.filter(r => isLongTest(r.testName, r.testType));
-    const shortTests = results.filter(r => !isLongTest(r.testName, r.testType));
-
-    const pages = [];
-    longTests.forEach(test => pages.push([test]));
-    
-    // تقسيم الفحوصات العادية لصفحات (كل 12 فحص)
-    const TESTS_PER_PAGE = 12;
-    for (let i = 0; i < shortTests.length; i += TESTS_PER_PAGE) {
-      pages.push(shortTests.slice(i, i + TESTS_PER_PAGE));
-    }
 
     const printContent = `
       <!DOCTYPE html>
@@ -376,98 +436,360 @@ export default function Results() {
           <meta charset="UTF-8">
           <title>Test Results - ${selectedVisitData.patientName}</title>
           <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Inter', Arial, sans-serif; padding: 25px; line-height: 1.5; color: #1f2937; background: #ffffff; }
-            
-            .page-container { 
-               page-break-after: always; 
-               position: relative;
-               min-height: 95vh;
-               display: flex;
-               flex-direction: column;
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
             }
-            .page-container:last-child { page-break-after: auto; }
+            body {
+              font-family: 'Inter', Arial, sans-serif;
+              padding: 35px;
+              line-height: 1.5;
+              color: #1f2937;
+              background: #ffffff;
+            }
+            .page {
+              page-break-after: always;
+            }
+            .page:last-child {
+              page-break-after: auto;
+            }
+            .page-content {
+              page-break-inside: avoid;
+            }
             
-            .multiline-text { white-space: pre-wrap; }
-            .custom-section { padding: 10px; margin-bottom: 10px; border-radius: 4px; }
-            .patient-info { background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #e5e7eb; }
-            .patient-info h2 { font-size: 16px; margin-bottom: 10px; color: #1e3a8a; font-weight: 700; border-bottom: 1px solid #e5e7eb; padding-bottom: 5px; }
-            .info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-            .info-item { display: flex; gap: 6px; font-size: 13px; }
-            .info-label { font-weight: 600; color: #64748b; }
-            .info-value { color: #1f2937; font-weight: 500; }
-            .results-table { width: 100%; border-collapse: collapse; margin-top: 10px; border: 1px solid #d1d5db; }
-            .results-table th { background: #1e3a8a; color: #ffffff; padding: 8px; text-align: left; font-weight: 600; font-size: 13px; border: 1px solid #d1d5db; }
-            .results-table td { padding: 8px; border: 1px solid #d1d5db; font-size: 13px; vertical-align: top; }
-            .results-table tr:nth-child(even) { background: #f9fafb; }
+            /* Custom sections styling */
+            .custom-section {
+              padding: 12px;
+              margin-bottom: 18px;
+              border-radius: 4px;
+            }
+            .custom-section.top {
+              margin-bottom: 18px;
+            }
+            .custom-section.bottom {
+              margin-top: 18px;
+            }
             
-            /* تنسيق اليورين القديم تماماً */
-            .complex-test { margin-top: 10px; }
-            .complex-test h3 { color: #1e3a8a; font-size: 16px; margin-bottom: 10px; border-bottom: 2px solid #1e3a8a; padding-bottom: 4px; font-weight: 700; }
-            .complex-test h4 { color: #1e40af; font-size: 14px; margin-bottom: 8px; margin-top: 15px; font-weight: 600; }
-            .complex-test table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-            .complex-test td { padding: 6px 8px; border: 1px solid #d1d5db; font-size: 13px; }
-            .complex-test td:nth-child(odd) { font-weight: 600; color: #475569; background: #f9fafb; }
+            /* Patient info - professional design */
+            .patient-info {
+              background: #f9fafb;
+              padding: 18px;
+              border-radius: 6px;
+              margin-bottom: 25px;
+              border: 1px solid #e5e7eb;
+            }
+            .patient-info h2 {
+              font-size: 16px;
+              margin-bottom: 12px;
+              color: #1e3a8a;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-grid {
+              display: grid;
+              grid-template-columns: repeat(2, 1fr);
+              gap: 12px;
+            }
+            .info-item {
+              display: flex;
+              gap: 8px;
+              font-size: 14px;
+            }
+            .info-label {
+              font-weight: 600;
+              color: #64748b;
+            }
+            .info-value {
+              color: #1f2937;
+              font-weight: 500;
+            }
             
-            .results-header-title { margin-bottom: 10px; color: #1e3a8a; font-weight: 700; font-size: 16px; margin-top: 10px; }
-            @media print { body { padding: 0; } }
+            /* Standard test results table - elegant design */
+            .results-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 15px;
+              border: 1px solid #d1d5db;
+            }
+            .results-table th {
+              background: #1e3a8a;
+              color: #ffffff;
+              padding: 10px;
+              text-align: left;
+              font-weight: 600;
+              font-size: 14px;
+              border: 1px solid #d1d5db;
+            }
+            .results-table td {
+              padding: 10px;
+              border: 1px solid #d1d5db;
+              font-size: 14px;
+            }
+            .results-table tr:nth-child(even) {
+              background: #f9fafb;
+            }
+            .test-name {
+              font-weight: 600;
+              color: #1e3a8a;
+            }
+            .test-result {
+              font-family: 'JetBrains Mono', monospace;
+              font-weight: 700;
+              color: #059669;
+              font-size: 14px;
+            }
+            
+            /* Long test auto-scaling for perfect fit */
+            .long-test-container {
+              page-break-inside: avoid;
+              transform-origin: top left;
+            }
+            .long-test-container.auto-scale {
+              transform: scale(0.95);
+            }
+            
+            /* Urine/Stool test styling - compact and elegant */
+            .complex-test {
+              page-break-inside: avoid;
+            }
+            .complex-test h3 {
+              color: #1e3a8a;
+              font-size: 17px;
+              margin-bottom: 12px;
+              border-bottom: 2px solid #1e3a8a;
+              padding-bottom: 4px;
+              font-weight: 700;
+            }
+            .complex-test h4 {
+              color: #1e40af;
+              font-size: 14px;
+              margin-bottom: 8px;
+              margin-top: 15px;
+              font-weight: 600;
+            }
+            .complex-test table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 12px;
+            }
+            .complex-test td {
+              padding: 6px 8px;
+              border: 1px solid #d1d5db;
+              font-size: 13px;
+            }
+            .complex-test td:nth-child(odd) {
+              font-weight: 600;
+              color: #475569;
+              background: #f9fafb;
+            }
+            .complex-test td:nth-child(even) {
+              color: #059669;
+              font-weight: 600;
+              background: #ffffff;
+            }
+            @media print {
+              body {
+                padding: 20px;
+              }
+              .page {
+                page-break-after: always;
+              }
+              .page:last-child {
+                page-break-after: auto;
+              }
+              .page-content {
+                page-break-inside: avoid;
+              }
+              .custom-section {
+                page-break-inside: avoid;
+              }
+              .patient-info {
+                page-break-after: avoid;
+              }
+              .results-table {
+                page-break-inside: avoid;
+              }
+              .urine-section {
+                page-break-inside: avoid;
+              }
+            }
           </style>
         </head>
         <body>
-          ${pages.map((pageTests, index) => `
-            <div class="page-container">
-               ${topSections.map(s => `<div class="custom-section top" style="text-align:${s.alignment};color:${s.textColor};background:${s.backgroundColor};font-size:${s.fontSize}px">${escapeHtml(s.text)}</div>`).join('')}
-               ${patientHeaderHTML}
-               <h2 class="results-header-title">Test Results ${pages.length > 1 ? `(Page ${index + 1} of ${pages.length})` : ''}</h2>
-               
-               <div style="flex-grow: 1;">
-                 ${pageTests.map(result => {
-                    if (result.testType === 'urine' && result.urineData) {
-                      const uData = result.urineData;
-                      return `
-                       <div class="complex-test">
-                         <h3>Urine Analysis</h3>
-                         <div>
-                           <h4>Physical Examination</h4>
-                           <table><tbody>
-                             <tr><td>Colour</td><td>${escapeHtml(uData.colour || '')}</td><td>Aspect</td><td>${escapeHtml(uData.aspect || '')}</td></tr>
-                             <tr><td>Reaction</td><td>${escapeHtml(uData.reaction || '')}</td><td>Specific Gravity</td><td>${escapeHtml(uData.specificGravity || '')}</td></tr>
-                           </tbody></table>
-                         </div>
-                         <div>
-                           <h4>Chemical Examination</h4>
-                           <table><tbody>
-                             <tr><td>Glucose</td><td>${escapeHtml(uData.glucose || '')}</td><td>Protein</td><td>${escapeHtml(uData.protein || '')}</td></tr>
-                             <tr><td>Bilirubin</td><td>${escapeHtml(uData.bilirubin || '')}</td><td>Ketones</td><td>${escapeHtml(uData.ketones || '')}</td></tr>
-                             <tr><td>Nitrite</td><td>${escapeHtml(uData.nitrite || '')}</td><td>Leukocyte</td><td>${escapeHtml(uData.leukocyte || '')}</td></tr>
-                             <tr><td>Blood</td><td colspan="3">${escapeHtml(uData.blood || '')}</td></tr>
-                           </tbody></table>
-                         </div>
-                         <div>
-                           <h4>Microscopical Examination</h4>
-                           <table><tbody>
-                             <tr><td>Pus Cells</td><td>${escapeHtml(uData.pusCells || '')}</td><td>Red Cells</td><td>${escapeHtml(uData.redCells || '')}</td></tr>
-                             <tr><td>Epithelial Cell</td><td>${escapeHtml(uData.epithelialCell || '')}</td><td>Bacteria</td><td>${escapeHtml(uData.bacteria || '')}</td></tr>
-                             <tr><td>Crystals</td><td>${escapeHtml(uData.crystals || '')}</td><td>Amorphous</td><td>${escapeHtml(uData.amorphous || '')}</td></tr>
-                             <tr><td>Mucus</td><td>${escapeHtml(uData.mucus || '')}</td><td>Other</td><td>${escapeHtml(uData.other || '')}</td></tr>
-                           </tbody></table>
-                         </div>
-                       </div>`;
-                    } else {
-                      return `
-                       <table class="results-table">
-                         <thead><tr><th style="width:30%">Test Name</th><th style="width:20%">Result</th><th style="width:15%">Unit</th><th style="width:35%">Normal Range</th></tr></thead>
-                         <tbody><tr>
-                           <td style="color:#1e3a8a; font-weight:600">${escapeHtml(result.testName)}</td>
-                           <td style="color:#059669; font-weight:700">${escapeHtml(result.result || '-')}</td>
-                           <td>${escapeHtml(result.unit || '-')}</td>
-                           <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td>
-                         </tr></tbody>
-                       </table>`;
-                    }
-                 }).join('')}
-               </div>
-               ${bottomSections.map(s => `<div class="custom-section bottom" style="text-align:${s.alignment};color:${s.textColor};background:${s.backgroundColor};font-size:${s.fontSize}px">${escapeHtml(s.text)}</div>`).join('')}
+          ${pages.map((pageTests, pageIndex) => `
+            <div class="page">
+              <div class="page-content">
+                ${topSections.map(section => `
+                  <div class="custom-section top" style="
+                    text-align: ${section.alignment};
+                    color: ${escapeHtml(section.textColor)};
+                    background-color: ${escapeHtml(section.backgroundColor)};
+                    font-size: ${section.fontSize || 16}px;
+                  ">
+                    ${escapeHtml(section.text)}
+                  </div>
+                `).join('')}
+                
+                ${patientInfoHTML}
+
+                <h2 style="margin-bottom: 12px; color: #1e3a8a; font-weight: 700; font-size: 16px;">Test Results</h2>
+                ${pageTests.map(result => {
+            // Check if this is a long test (urine or other complex tests)
+            const isLongTestType = isLongTest(result.testName, result.testType);
+            
+            if (result.testType === 'urine' && result.urineData) {
+              const uData = result.urineData;
+              return `
+                <div class="complex-test long-test-container auto-scale">
+                  <h3>Urine Analysis</h3>
+                  
+                  <div>
+                    <h4>Physical Examination</h4>
+                    <table>
+                      <tbody>
+                        <tr>
+                          <td>Colour</td>
+                          <td>${escapeHtml(uData.colour || 'Amber Yellow')}</td>
+                          <td>Aspect</td>
+                          <td>${escapeHtml(uData.aspect || 'Clear')}</td>
+                        </tr>
+                        <tr>
+                          <td>Reaction</td>
+                          <td>${escapeHtml(uData.reaction || 'Acidic')}</td>
+                          <td>Specific Gravity</td>
+                          <td>${escapeHtml(uData.specificGravity || '1015-1025')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div>
+                    <h4>Chemical Examination</h4>
+                    <table>
+                      <tbody>
+                        <tr>
+                          <td>Glucose</td>
+                          <td>${escapeHtml(uData.glucose || 'Nil')}</td>
+                          <td>Protein</td>
+                          <td>${escapeHtml(uData.protein || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Bilirubin</td>
+                          <td>${escapeHtml(uData.bilirubin || 'Nil')}</td>
+                          <td>Ketones</td>
+                          <td>${escapeHtml(uData.ketones || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Nitrite</td>
+                          <td>${escapeHtml(uData.nitrite || 'Nil')}</td>
+                          <td>Leukocyte</td>
+                          <td>${escapeHtml(uData.leukocyte || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Blood</td>
+                          <td colspan="3">${escapeHtml(uData.blood || 'Nil')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div>
+                    <h4>Microscopical Examination</h4>
+                    <table>
+                      <tbody>
+                        <tr>
+                          <td>Pus Cells</td>
+                          <td>${escapeHtml(uData.pusCells || 'Nil')}</td>
+                          <td>Red Cells</td>
+                          <td>${escapeHtml(uData.redCells || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Epithelial Cell</td>
+                          <td>${escapeHtml(uData.epithelialCell || 'Nil')}</td>
+                          <td>Bacteria</td>
+                          <td>${escapeHtml(uData.bacteria || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Crystals</td>
+                          <td>${escapeHtml(uData.crystals || 'Nil')}</td>
+                          <td>Amorphous</td>
+                          <td>${escapeHtml(uData.amorphous || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Mucus</td>
+                          <td>${escapeHtml(uData.mucus || 'Nil')}</td>
+                          <td>Other</td>
+                          <td>${escapeHtml(uData.other || 'Nil')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              `;
+            } else {
+              // Check if this is a long test (needs auto-scaling)
+              if (isLongTestType) {
+                return `
+                  <div class="long-test-container auto-scale">
+                    <table class="results-table" style="margin-bottom: 20px; page-break-inside: avoid;">
+                      <thead>
+                        <tr>
+                          <th>Test Name</th>
+                          <th>Result</th>
+                          <th>Unit</th>
+                          <th>Normal Range</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td class="test-name">${escapeHtml(result.testName)}</td>
+                          <td class="test-result">${escapeHtml(result.result || '-')}</td>
+                          <td>${escapeHtml(result.unit || '-')}</td>
+                          <td>${escapeHtml(result.normalRange || '-')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                `;
+              } else {
+                // Short test - normal rendering
+                return `
+                  <table class="results-table" style="margin-bottom: 20px; page-break-inside: avoid;">
+                    <thead>
+                      <tr>
+                        <th>Test Name</th>
+                        <th>Result</th>
+                        <th>Unit</th>
+                        <th>Normal Range</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td class="test-name">${escapeHtml(result.testName)}</td>
+                        <td class="test-result">${escapeHtml(result.result || '-')}</td>
+                        <td>${escapeHtml(result.unit || '-')}</td>
+                        <td>${escapeHtml(result.normalRange || '-')}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                `;
+              }
+            }
+          }).join('')}
+
+                ${bottomSections.map(section => `
+                  <div class="custom-section bottom" style="
+                    text-align: ${section.alignment};
+                    color: ${escapeHtml(section.textColor)};
+                    background-color: ${escapeHtml(section.backgroundColor)};
+                    font-size: ${section.fontSize || 16}px;
+                  ">
+                    ${escapeHtml(section.text)}
+                  </div>
+                `).join('')}
+              </div>
             </div>
           `).join('')}
         </body>
@@ -483,8 +805,23 @@ export default function Results() {
   };
 
   const exportPDF = () => {
-    toast({ title: "Export PDF", description: "Use 'Save as PDF' in the print dialog." });
-    setTimeout(printResults, 500);
+    if (!selectedVisit || results.length === 0) {
+      toast({
+        title: "No Data",
+        description: "Please select a patient with test results to export",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    toast({
+      title: "Export as PDF",
+      description: "Please select 'Save as PDF' from the print dialog",
+    });
+    
+    setTimeout(() => {
+      printResults();
+    }, 500);
   };
 
   const filteredVisits = visits?.filter((v) =>
@@ -650,55 +987,212 @@ export default function Results() {
                 <div className="space-y-4">
                   {results.map((test, index) => {
                     if (test.testType === "urine") {
+                      const uData = test.urineData || {};
                       return (
-                         <div key={test.id} className="border p-4 rounded-lg bg-muted/20">
-                           <h3 className="font-bold mb-2 text-primary">Urine Analysis</h3>
-                           
-                           {/* Urine Input Section (Original) */}
-                           <div className="grid grid-cols-2 gap-4">
-                             <div>
-                               <Label className="text-xs">Physical</Label>
-                               <Input value={test.urineData?.colour} onChange={(e) => updateUrineData(test.id, "colour", e.target.value)} className="mb-2 h-8" placeholder="Colour" />
-                               <Input value={test.urineData?.aspect} onChange={(e) => updateUrineData(test.id, "aspect", e.target.value)} className="h-8" placeholder="Aspect" />
-                               <Input value={test.urineData?.reaction} onChange={(e) => updateUrineData(test.id, "reaction", e.target.value)} className="mb-2 h-8" placeholder="Reaction" />
-                               <Input value={test.urineData?.specificGravity} onChange={(e) => updateUrineData(test.id, "specificGravity", e.target.value)} className="h-8" placeholder="Sp. Gravity" />
-                             </div>
-                             <div>
-                               <Label className="text-xs">Chemical</Label>
-                               <Input value={test.urineData?.glucose} onChange={(e) => updateUrineData(test.id, "glucose", e.target.value)} className="mb-2 h-8" placeholder="Glucose" />
-                               <Input value={test.urineData?.protein} onChange={(e) => updateUrineData(test.id, "protein", e.target.value)} className="h-8" placeholder="Protein" />
-                               <Input value={test.urineData?.bilirubin} onChange={(e) => updateUrineData(test.id, "bilirubin", e.target.value)} className="mb-2 h-8" placeholder="Bilirubin" />
-                               <Input value={test.urineData?.ketones} onChange={(e) => updateUrineData(test.id, "ketones", e.target.value)} className="h-8" placeholder="Ketones" />
-                               <Input value={test.urineData?.nitrite} onChange={(e) => updateUrineData(test.id, "nitrite", e.target.value)} className="mb-2 h-8" placeholder="Nitrite" />
-                               <Input value={test.urineData?.leukocyte} onChange={(e) => updateUrineData(test.id, "leukocyte", e.target.value)} className="h-8" placeholder="Leukocyte" />
-                               <Input value={test.urineData?.blood} onChange={(e) => updateUrineData(test.id, "blood", e.target.value)} className="mb-2 h-8" placeholder="Blood" />
-                             </div>
-                           </div>
-                           <div className="grid grid-cols-2 gap-4 mt-2">
-                             <div>
-                               <Label className="text-xs">Microscopical</Label>
-                               <Input value={test.urineData?.pusCells} onChange={(e) => updateUrineData(test.id, "pusCells", e.target.value)} className="mb-2 h-8" placeholder="Pus Cells" />
-                               <Input value={test.urineData?.redCells} onChange={(e) => updateUrineData(test.id, "redCells", e.target.value)} className="h-8" placeholder="Red Cells" />
-                               <Input value={test.urineData?.epithelialCell} onChange={(e) => updateUrineData(test.id, "epithelialCell", e.target.value)} className="mb-2 h-8" placeholder="Epith. Cell" />
-                               <Input value={test.urineData?.bacteria} onChange={(e) => updateUrineData(test.id, "bacteria", e.target.value)} className="h-8" placeholder="Bacteria" />
-                             </div>
-                             <div>
-                               <Label className="text-xs">&nbsp;</Label>
-                               <Input value={test.urineData?.crystals} onChange={(e) => updateUrineData(test.id, "crystals", e.target.value)} className="mb-2 h-8" placeholder="Crystals" />
-                               <Input value={test.urineData?.amorphous} onChange={(e) => updateUrineData(test.id, "amorphous", e.target.value)} className="h-8" placeholder="Amorphous" />
-                               <Input value={test.urineData?.mucus} onChange={(e) => updateUrineData(test.id, "mucus", e.target.value)} className="mb-2 h-8" placeholder="Mucus" />
-                               <Input value={test.urineData?.other} onChange={(e) => updateUrineData(test.id, "other", e.target.value)} className="h-8" placeholder="Other" />
-                             </div>
-                           </div>
-                         </div>
+                        <div key={test.id} className="border border-border rounded-lg p-6" data-testid={`result-row-${index}`}>
+                          <h3 className="text-lg font-semibold mb-4 text-primary">Urine Analysis</h3>
+                          
+                          {/* Physical Examination */}
+                          <div className="mb-6">
+                            <h4 className="text-md font-semibold mb-3 text-foreground">Physical Examination</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Colour</Label>
+                                <Input
+                                  value={uData.colour || "Amber Yellow"}
+                                  onChange={(e) => updateUrineData(test.id, "colour", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Aspect</Label>
+                                <Input
+                                  value={uData.aspect || "Clear"}
+                                  onChange={(e) => updateUrineData(test.id, "aspect", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Reaction</Label>
+                                <Input
+                                  value={uData.reaction || "Acidic"}
+                                  onChange={(e) => updateUrineData(test.id, "reaction", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Specific Gravity</Label>
+                                <Input
+                                  value={uData.specificGravity || "1015-1025"}
+                                  onChange={(e) => updateUrineData(test.id, "specificGravity", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Chemical Examination */}
+                          <div className="mb-6">
+                            <h4 className="text-md font-semibold mb-3 text-foreground">Chemical Examination</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Glucose</Label>
+                                <Input
+                                  value={uData.glucose ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "glucose", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Protein</Label>
+                                <Input
+                                  value={uData.protein ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "protein", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Bilirubin</Label>
+                                <Input
+                                  value={uData.bilirubin ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "bilirubin", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Ketones</Label>
+                                <Input
+                                  value={uData.ketones ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "ketones", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Nitrite</Label>
+                                <Input
+                                  value={uData.nitrite ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "nitrite", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Leukocyte</Label>
+                                <Input
+                                  value={uData.leukocyte ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "leukocyte", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Blood</Label>
+                                <Input
+                                  value={uData.blood ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "blood", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Microscopical Examination */}
+                          <div>
+                            <h4 className="text-md font-semibold mb-3 text-foreground">Microscopical Examination</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Pus Cells</Label>
+                                <Input
+                                  value={uData.pusCells ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "pusCells", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Red Cells</Label>
+                                <Input
+                                  value={uData.redCells ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "redCells", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Epithelial Cell</Label>
+                                <Input
+                                  value={uData.epithelialCell ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "epithelialCell", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Bacteria</Label>
+                                <Input
+                                  value={uData.bacteria ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "bacteria", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Crystals</Label>
+                                <Input
+                                  value={uData.crystals ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "crystals", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Amorphous</Label>
+                                <Input
+                                  value={uData.amorphous ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "amorphous", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Mucus</Label>
+                                <Input
+                                  value={uData.mucus ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "mucus", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Label className="w-32 text-sm">Other</Label>
+                                <Input
+                                  value={uData.other ?? "Nil"}
+                                  onChange={(e) => updateUrineData(test.id, "other", e.target.value)}
+                                  onFocus={(e) => e.target.select()}
+                                  className="flex-1"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       );
                     }
                     
-                    // Standard test (Updated with Textarea for multi-line)
+                    // Standard test
                     return (
                       <div
                         key={test.id}
-                        className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 border border-border rounded-lg hover:shadow-sm transition-all"
+                        className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 border border-border rounded-lg hover-elevate"
+                        data-testid={`result-row-${index}`}
                       >
                         <div className="space-y-2">
                           <Label className="text-sm font-medium">{test.testName}</Label>
@@ -731,11 +1225,12 @@ export default function Results() {
                           <Label htmlFor={`range-${test.id}`} className="text-xs text-muted-foreground">
                             Normal Range
                           </Label>
-                          {/* Textarea for Multiline */}
-                          <Textarea 
-                            value={test.normalRange || ""} 
-                            onChange={(e) => updateResult(test.id, "normalRange", e.target.value)} 
-                            className="min-h-[60px] resize-y"
+                          <Input
+                            id={`range-${test.id}`}
+                            placeholder="Range"
+                            value={test.normalRange || ""}
+                            onChange={(e) => updateResult(test.id, "normalRange", e.target.value)}
+                            data-testid={`input-range-${index}`}
                           />
                         </div>
                       </div>
@@ -744,6 +1239,12 @@ export default function Results() {
                 </div>
               </CardContent>
             </Card>
+          )}
+
+          {!selectedVisit && (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">Select a patient to enter test results</p>
+            </div>
           )}
         </div>
 

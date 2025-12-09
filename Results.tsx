@@ -3,7 +3,6 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea"; 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Save, Printer, FileDown, Search, Calendar, ArrowLeft, Settings, Trash2, Plus, X } from "lucide-react";
@@ -42,7 +41,6 @@ export default function Results() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
-  
   const [patientFormData, setPatientFormData] = useState({
     name: "",
     age: "",
@@ -50,12 +48,10 @@ export default function Results() {
     phone: "",
     source: "",
   });
-  
   const [visitFormData, setVisitFormData] = useState({
     testIds: [] as string[],
     totalCost: 0,
   });
-  
   const { toast } = useToast();
 
   const { data: visits } = useQuery<Visit[]>({
@@ -99,6 +95,22 @@ export default function Results() {
   const updatePatientMutation = useMutation({
     mutationFn: (data: { id: string; patient: Partial<Patient> }) =>
       apiRequest("PUT", `/api/patients/${data.id}`, data.patient),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
+      setEditDialogOpen(false);
+      toast({
+        title: "Changes Saved",
+        description: "Patient information has been updated successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update patient information",
+        variant: "destructive",
+      });
+    },
   });
 
   const deletePatientMutation = useMutation({
@@ -110,8 +122,15 @@ export default function Results() {
       setEditDialogOpen(false);
       setSelectedVisit("");
       toast({
-        title: "Deleted",
-        description: "Patient data deleted successfully.",
+        title: "Patient Deleted",
+        description: "Patient and all related data have been permanently deleted",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete patient",
+        variant: "destructive",
       });
     },
   });
@@ -119,14 +138,17 @@ export default function Results() {
   const updateVisitMutation = useMutation({
     mutationFn: (data: { id: string; visit: Partial<Visit> }) =>
       apiRequest("PUT", `/api/visits/${data.id}`, data.visit),
-  });
-
-  const deleteTestResultMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("DELETE", `/api/test-results/${id}`, {}),
-  });
-
-  const createTestResultMutation = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/test-results", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update visit information",
+        variant: "destructive",
+      });
+    },
   });
 
   const batchUpdateMutation = useMutation({
@@ -134,10 +156,7 @@ export default function Results() {
       apiRequest("PUT", "/api/test-results/batch", updates),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
-      toast({
-        title: "Saved",
-        description: "Results saved successfully",
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/tests"] });
     },
   });
 
@@ -162,12 +181,32 @@ export default function Results() {
 
   const handleEditPatient = () => {
     if (!selectedVisit) {
-      toast({ title: "Error", description: "Please select a patient first", variant: "destructive" });
+      toast({
+        title: "Error",
+        description: "Please select a patient first",
+        variant: "destructive",
+      });
       return;
     }
     
     const visit = visits?.find(v => v.id === selectedVisit);
-    if (!visit || !currentPatient) return;
+    if (!visit) {
+      toast({
+        title: "Error",
+        description: "Visit not found",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!currentPatient) {
+      toast({
+        title: "Patient Not Found",
+        description: "The patient record for this visit could not be found. It may have been deleted.",
+        variant: "destructive",
+      });
+      return;
+    }
     
     setEditingPatient(currentPatient);
     setEditingVisit(visit);
@@ -189,71 +228,38 @@ export default function Results() {
     if (!editingPatient || !editingVisit) return;
     
     try {
+      // Update patient data
+      const updatedPatientData: Partial<Patient> = {
+        name: patientFormData.name,
+        age: patientFormData.age ? parseInt(patientFormData.age) : undefined,
+        gender: patientFormData.gender || undefined,
+        phone: patientFormData.phone || undefined,
+        source: patientFormData.source || undefined,
+      };
+
       await updatePatientMutation.mutateAsync({
         id: editingPatient.id,
-        patient: {
-          name: patientFormData.name,
-          age: patientFormData.age ? parseInt(patientFormData.age) : undefined,
-          gender: patientFormData.gender,
-          phone: patientFormData.phone,
-          source: patientFormData.source,
-        },
+        patient: updatedPatientData,
       });
 
-      const oldTestIds = editingVisit.testIds || [];
-      const newTestIds = visitFormData.testIds;
-      const addedTestIds = newTestIds.filter(id => !oldTestIds.includes(id));
-      const removedTestIds = oldTestIds.filter(id => !newTestIds.includes(id));
-
-      if (removedTestIds.length > 0) {
-        const resultsToDelete = results.filter(r => removedTestIds.includes(r.testId));
-        for (const res of resultsToDelete) {
-           await deleteTestResultMutation.mutateAsync(res.id);
-        }
-        setResults(prev => prev.filter(r => !removedTestIds.includes(r.testId)));
-      }
-
-      for (const testId of addedTestIds) {
-        const testDef = allTests?.find(t => t.id === testId);
-        if (testDef) {
-           const resultData: any = {
-              visitId: editingVisit.id,
-              testId: testDef.id,
-              testName: testDef.name,
-              price: testDef.price,
-              unit: testDef.unit,
-              normalRange: testDef.normalRange,
-              testType: testDef.testType || "standard",
-           };
-           if (testDef.testType === "urine") {
-              resultData.urineData = {
-                colour: "Amber Yellow", aspect: "Clear", reaction: "Acidic",
-                specificGravity: "1015-1025", glucose: "Nil", protein: "Nil",
-                bilirubin: "Nil", ketones: "Nil", nitrite: "Nil", leukocyte: "Nil",
-                blood: "Nil", pusCells: "Nil", redCells: "Nil", epithelialCell: "Nil",
-                bacteria: "Nil", crystals: "Nil", amorphous: "Nil", mucus: "Nil", other: "Nil"
-              };
-           }
-           await createTestResultMutation.mutateAsync(resultData);
-        }
-      }
+      // Update visit data (tests and price)
+      const updatedVisitData: Partial<Visit> = {
+        testIds: visitFormData.testIds,
+        totalCost: visitFormData.totalCost,
+      };
 
       await updateVisitMutation.mutateAsync({
         id: editingVisit.id,
-        visit: {
-          testIds: visitFormData.testIds,
-          totalCost: visitFormData.totalCost,
-        },
+        visit: updatedVisitData,
       });
 
-      await queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
-      
       setEditDialogOpen(false);
-      toast({ title: "Saved", description: "Changes updated successfully" });
+      toast({
+        title: "Changes Saved",
+        description: "Patient and visit information have been updated successfully",
+      });
     } catch (error) {
-      toast({ title: "Error", description: "Failed to save changes", variant: "destructive" });
+      // Error handling is in the mutations
     }
   };
 
@@ -280,6 +286,7 @@ export default function Results() {
 
   const saveResults = async () => {
     try {
+      // Prepare all updates
       const updates = results.map((result) => ({
         id: result.id,
         data: {
@@ -290,9 +297,20 @@ export default function Results() {
           urineData: result.testType === "urine" ? result.urineData : undefined,
         },
       }));
+
+      // Send all updates in a single batch request
       await batchUpdateMutation.mutateAsync(updates);
-    } catch (e) {
-      toast({ title: "Error", description: "Failed to save results", variant: "destructive" });
+      
+      toast({
+        title: "Results Saved",
+        description: "Test results have been saved successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to save results",
+        variant: "destructive",
+      });
     }
   };
 
@@ -302,7 +320,6 @@ export default function Results() {
     return div.innerHTML;
   };
 
-  // --- دالة الطباعة (المعدلة بدقة حسب طلبك الأخير) ---
   const printResults = async () => {
     if (!selectedVisit || results.length === 0) {
       toast({
@@ -316,7 +333,7 @@ export default function Results() {
     const selectedVisitData = visits?.find(v => v.id === selectedVisit);
     if (!selectedVisitData) return;
 
-    let patientData = currentPatient;
+    let patientData: Patient | null = null;
     try {
       const response = await fetch(`/api/patients/${selectedVisitData.patientId}`);
       if (response.ok) {
@@ -336,10 +353,38 @@ export default function Results() {
       customSections = [];
     }
 
-    // هنا يتم فصل الأقسام العلوية والسفلية
-    // ملاحظة: لن نقوم بطباعة الأقسام العلوية فوق الجدول بناءً على طلبك
     const topSections = customSections.filter(s => s.position === "top" && s.text.trim());
     const bottomSections = customSections.filter(s => s.position === "bottom" && s.text.trim());
+
+    // 🎯 Smart Intelligent Pagination System
+    // Define long tests that need their own dedicated page
+    const LONG_TEST_KEYWORDS = [
+      'urine', 'stool', 'culture', 'blood culture', 
+      'urine analysis', 'stool analysis', 'sensitivity'
+    ];
+    
+    const isLongTest = (testName: string, testType?: string): boolean => {
+      if (testType === 'urine') return true;
+      const lowerName = testName.toLowerCase();
+      return LONG_TEST_KEYWORDS.some(keyword => lowerName.includes(keyword));
+    };
+
+    // Classify tests into long and short
+    const longTests = results.filter(r => isLongTest(r.testName, r.testType));
+    const shortTests = results.filter(r => !isLongTest(r.testName, r.testType));
+
+    const pages: Array<typeof results> = [];
+
+    // Each long test gets its own dedicated page
+    longTests.forEach(test => {
+      pages.push([test]);
+    });
+
+    // Group short tests intelligently (max 8 per page for optimal spacing)
+    const TESTS_PER_PAGE = 8;
+    for (let i = 0; i < shortTests.length; i += TESTS_PER_PAGE) {
+      pages.push(shortTests.slice(i, i + TESTS_PER_PAGE));
+    }
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -351,62 +396,38 @@ export default function Results() {
       return;
     }
 
-    // --- مربع معلومات المريض (مع الجنس والتاريخ) ---
-    // هذا المربع سيتكرر في بداية كل صفحة
-    const patientHeaderBlock = `
-      <div class="header-box">
-        <div class="info-row"><span class="label">Name:</span> ${escapeHtml(patientData?.name || '')}</div>
-        <div class="info-row"><span class="label">Age:</span> ${patientData?.age || ''}</div>
-        <div class="info-row"><span class="label">Gender:</span> ${escapeHtml(patientData?.gender || '')}</div>
-        <div class="info-row"><span class="label">Ref:</span> ${escapeHtml(patientData?.source || '')}</div>
-        <div class="info-row"><span class="label">Phone:</span> ${escapeHtml(patientData?.phone || '')}</div>
-        <div class="info-row"><span class="label" style="color: #000; font-weight: bold;">Date:</span> ${selectedVisitData.visitDate}</div>
+    // Generate patient info HTML (reused on each page)
+    const patientInfoHTML = `
+      <div class="patient-info">
+        <h2>Patient Information</h2>
+        <div class="info-grid">
+          ${patientData?.name ? `
+          <div class="info-item">
+            <span class="info-label">Name:</span>
+            <span class="info-value">${escapeHtml(patientData.name)}</span>
+          </div>
+          ` : ''}
+          ${patientData?.age ? `
+          <div class="info-item">
+            <span class="info-label">Age:</span>
+            <span class="info-value">${patientData.age}</span>
+          </div>
+          ` : ''}
+          ${patientData?.gender ? `
+          <div class="info-item">
+            <span class="info-label">Gender:</span>
+            <span class="info-value">${escapeHtml(patientData.gender)}</span>
+          </div>
+          ` : ''}
+          ${patientData?.phone ? `
+          <div class="info-item">
+            <span class="info-label">Phone:</span>
+            <span class="info-value">${escapeHtml(patientData.phone)}</span>
+          </div>
+          ` : ''}
+        </div>
       </div>
     `;
-
-    // --- منطق تقسيم الصفحات الذكي (Smart Pagination) ---
-    const isLongTest = (testName: string, testType?: string): boolean => {
-      if (testType === 'urine') return true;
-      const lowerName = testName.toLowerCase();
-      return ['stool', 'culture', 'sensitivity'].some(keyword => lowerName.includes(keyword));
-    };
-
-    const longTests = results.filter(r => isLongTest(r.testName, r.testType));
-    const shortTests = results.filter(r => !isLongTest(r.testName, r.testType));
-
-    const pages = [];
-
-    // 1. الفحوصات الطويلة (كل فحص صفحة)
-    longTests.forEach(test => {
-      pages.push([test]);
-    });
-
-    // 2. الفحوصات القصيرة (حساب المساحة ديناميكياً)
-    // نفترض أن الصفحة تتسع لـ 18 وحدة ارتفاع
-    const MAX_PAGE_HEIGHT = 18; 
-    let currentPage: typeof results = [];
-    let currentHeight = 0;
-
-    shortTests.forEach(test => {
-      // نحسب ارتفاع الفحص: 1 وحدة أساسية + 0.5 لكل سطر إضافي في النطاق الطبيعي
-      const lines = (test.normalRange || '').split('\n').length;
-      const itemHeight = 1 + (lines > 1 ? (lines - 1) * 0.5 : 0);
-
-      if (currentHeight + itemHeight > MAX_PAGE_HEIGHT) {
-        // إذا امتلأت الصفحة، نحفظها ونفتح صفحة جديدة
-        pages.push(currentPage);
-        currentPage = [];
-        currentHeight = 0;
-      }
-      
-      currentPage.push(test);
-      currentHeight += itemHeight;
-    });
-
-    // إضافة آخر مجموعة متبقية
-    if (currentPage.length > 0) {
-      pages.push(currentPage);
-    }
 
     const printContent = `
       <!DOCTYPE html>
@@ -415,141 +436,360 @@ export default function Results() {
           <meta charset="UTF-8">
           <title>Test Results - ${selectedVisitData.patientName}</title>
           <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Inter', Arial, sans-serif; padding: 30px; line-height: 1.5; color: #1f2937; background: #ffffff; }
-            
-            /* تنسيق الصفحة والفواصل */
-            .page-container { 
-               page-break-after: always; 
-               position: relative;
-               min-height: 95vh;
-               display: flex;
-               flex-direction: column;
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
             }
-            .page-container:last-child { page-break-after: auto; }
+            body {
+              font-family: 'Inter', Arial, sans-serif;
+              padding: 35px;
+              line-height: 1.5;
+              color: #1f2937;
+              background: #ffffff;
+            }
+            .page {
+              page-break-after: always;
+            }
+            .page:last-child {
+              page-break-after: auto;
+            }
+            .page-content {
+              page-break-inside: avoid;
+            }
             
-            .multiline-text { white-space: pre-wrap; }
+            /* Custom sections styling */
+            .custom-section {
+              padding: 12px;
+              margin-bottom: 18px;
+              border-radius: 4px;
+            }
+            .custom-section.top {
+              margin-bottom: 18px;
+            }
+            .custom-section.bottom {
+              margin-top: 18px;
+            }
             
-            /* الأقسام المخصصة (فقط السفلية ستظهر حسب طلبك) */
-            .custom-section { padding: 10px; margin-top: auto; border-radius: 4px; }
-            
-            /* معلومات المريض */
-            .header-box { 
-              border: 1px solid #000; 
-              padding: 12px; 
-              margin-bottom: 20px; 
-              display: grid; 
-              grid-template-columns: repeat(3, 1fr);
+            /* Patient info - professional design */
+            .patient-info {
+              background: #f9fafb;
+              padding: 18px;
+              border-radius: 6px;
+              margin-bottom: 25px;
+              border: 1px solid #e5e7eb;
+            }
+            .patient-info h2 {
+              font-size: 16px;
+              margin-bottom: 12px;
+              color: #1e3a8a;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-grid {
+              display: grid;
+              grid-template-columns: repeat(2, 1fr);
+              gap: 12px;
+            }
+            .info-item {
+              display: flex;
               gap: 8px;
-              background: #f9f9f9;
+              font-size: 14px;
             }
-            .info-row { font-size: 14px; }
-            .label { font-weight: bold; color: #333; margin-right: 5px; }
+            .info-label {
+              font-weight: 600;
+              color: #64748b;
+            }
+            .info-value {
+              color: #1f2937;
+              font-weight: 500;
+            }
             
-            /* الجداول */
-            .results-table { width: 100%; border-collapse: collapse; margin-top: 15px; border: 1px solid #d1d5db; }
-            .results-table th { background: #1e3a8a; color: #ffffff; padding: 10px; text-align: left; font-weight: 600; font-size: 14px; border: 1px solid #d1d5db; }
-            .results-table td { padding: 10px; border: 1px solid #d1d5db; font-size: 14px; vertical-align: top; }
-            .results-table tr:nth-child(even) { background: #f9fafb; }
+            /* Standard test results table - elegant design */
+            .results-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 15px;
+              border: 1px solid #d1d5db;
+            }
+            .results-table th {
+              background: #1e3a8a;
+              color: #ffffff;
+              padding: 10px;
+              text-align: left;
+              font-weight: 600;
+              font-size: 14px;
+              border: 1px solid #d1d5db;
+            }
+            .results-table td {
+              padding: 10px;
+              border: 1px solid #d1d5db;
+              font-size: 14px;
+            }
+            .results-table tr:nth-child(even) {
+              background: #f9fafb;
+            }
+            .test-name {
+              font-weight: 600;
+              color: #1e3a8a;
+            }
+            .test-result {
+              font-family: 'JetBrains Mono', monospace;
+              font-weight: 700;
+              color: #059669;
+              font-size: 14px;
+            }
             
-            /* اليورين */
-            .complex-test { margin-top: 20px; }
-            .complex-test h3 { color: #1e3a8a; font-size: 17px; margin-bottom: 12px; border-bottom: 2px solid #1e3a8a; padding-bottom: 4px; font-weight: 700; }
-            .complex-test h4 { color: #1e40af; font-size: 14px; margin-bottom: 8px; margin-top: 15px; font-weight: 600; }
-            .complex-test table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
-            .complex-test td { padding: 6px 8px; border: 1px solid #d1d5db; font-size: 13px; }
-            .complex-test td:nth-child(odd) { font-weight: 600; color: #475569; background: #f9fafb; }
-            .complex-test td:nth-child(even) { color: #059669; font-weight: 600; background: #ffffff; }
-
-            .results-header-title { margin-bottom: 10px; color: #1e3a8a; font-weight: 700; font-size: 16px; margin-top: 10px; }
-
-            @media print { body { padding: 20px; } }
+            /* Long test auto-scaling for perfect fit */
+            .long-test-container {
+              page-break-inside: avoid;
+              transform-origin: top left;
+            }
+            .long-test-container.auto-scale {
+              transform: scale(0.95);
+            }
+            
+            /* Urine/Stool test styling - compact and elegant */
+            .complex-test {
+              page-break-inside: avoid;
+            }
+            .complex-test h3 {
+              color: #1e3a8a;
+              font-size: 17px;
+              margin-bottom: 12px;
+              border-bottom: 2px solid #1e3a8a;
+              padding-bottom: 4px;
+              font-weight: 700;
+            }
+            .complex-test h4 {
+              color: #1e40af;
+              font-size: 14px;
+              margin-bottom: 8px;
+              margin-top: 15px;
+              font-weight: 600;
+            }
+            .complex-test table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 12px;
+            }
+            .complex-test td {
+              padding: 6px 8px;
+              border: 1px solid #d1d5db;
+              font-size: 13px;
+            }
+            .complex-test td:nth-child(odd) {
+              font-weight: 600;
+              color: #475569;
+              background: #f9fafb;
+            }
+            .complex-test td:nth-child(even) {
+              color: #059669;
+              font-weight: 600;
+              background: #ffffff;
+            }
+            @media print {
+              body {
+                padding: 20px;
+              }
+              .page {
+                page-break-after: always;
+              }
+              .page:last-child {
+                page-break-after: auto;
+              }
+              .page-content {
+                page-break-inside: avoid;
+              }
+              .custom-section {
+                page-break-inside: avoid;
+              }
+              .patient-info {
+                page-break-after: avoid;
+              }
+              .results-table {
+                page-break-inside: avoid;
+              }
+              .urine-section {
+                page-break-inside: avoid;
+              }
+            }
           </style>
         </head>
         <body>
-          ${pages.map((pageTests, index) => `
-            <div class="page-container">
-               
-               <!-- 1. الكتابة الثابتة في البداية (هنا يمكنك وضع أي نص ثابت إن وجد، أو تركه فارغاً كما هو الآن) -->
-               <!-- لا نضع هنا نصوص الإعدادات بناءً على طلبك -->
+          ${pages.map((pageTests, pageIndex) => `
+            <div class="page">
+              <div class="page-content">
+                ${topSections.map(section => `
+                  <div class="custom-section top" style="
+                    text-align: ${section.alignment};
+                    color: ${escapeHtml(section.textColor)};
+                    background-color: ${escapeHtml(section.backgroundColor)};
+                    font-size: ${section.fontSize || 16}px;
+                  ">
+                    ${escapeHtml(section.text)}
+                  </div>
+                `).join('')}
+                
+                ${patientInfoHTML}
 
-               <!-- 2. معلومات المريض (مع الجنس) - تتكرر في كل صفحة -->
-               ${patientHeaderBlock}
+                <h2 style="margin-bottom: 12px; color: #1e3a8a; font-weight: 700; font-size: 16px;">Test Results</h2>
+                ${pageTests.map(result => {
+            // Check if this is a long test (urine or other complex tests)
+            const isLongTestType = isLongTest(result.testName, result.testType);
+            
+            if (result.testType === 'urine' && result.urineData) {
+              const uData = result.urineData;
+              return `
+                <div class="complex-test long-test-container auto-scale">
+                  <h3>Urine Analysis</h3>
+                  
+                  <div>
+                    <h4>Physical Examination</h4>
+                    <table>
+                      <tbody>
+                        <tr>
+                          <td>Colour</td>
+                          <td>${escapeHtml(uData.colour || 'Amber Yellow')}</td>
+                          <td>Aspect</td>
+                          <td>${escapeHtml(uData.aspect || 'Clear')}</td>
+                        </tr>
+                        <tr>
+                          <td>Reaction</td>
+                          <td>${escapeHtml(uData.reaction || 'Acidic')}</td>
+                          <td>Specific Gravity</td>
+                          <td>${escapeHtml(uData.specificGravity || '1015-1025')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
 
-               <!-- عنوان الجدول -->
-               <h2 class="results-header-title">Test Results ${pages.length > 1 ? `(Page ${index + 1}/${pages.length})` : ''}</h2>
-               
-               <!-- 3. جدول الفحوصات (المقسمة) -->
-               <div style="flex-grow: 1;">
-                 ${pageTests.map(result => {
-                    if (result.testType === 'urine' && result.urineData) {
-                      const uData = result.urineData;
-                      return `
-                        <div class="complex-test">
-                          <h3>Urine Analysis</h3>
-                          <div>
-                            <h4>Physical Examination</h4>
-                            <table><tbody>
-                              <tr><td>Colour</td><td>${escapeHtml(uData.colour || '')}</td><td>Aspect</td><td>${escapeHtml(uData.aspect || '')}</td></tr>
-                              <tr><td>Reaction</td><td>${escapeHtml(uData.reaction || '')}</td><td>Specific Gravity</td><td>${escapeHtml(uData.specificGravity || '')}</td></tr>
-                            </tbody></table>
-                          </div>
-                          <div>
-                            <h4>Chemical Examination</h4>
-                            <table><tbody>
-                              <tr><td>Glucose</td><td>${escapeHtml(uData.glucose || '')}</td><td>Protein</td><td>${escapeHtml(uData.protein || '')}</td></tr>
-                              <tr><td>Bilirubin</td><td>${escapeHtml(uData.bilirubin || '')}</td><td>Ketones</td><td>${escapeHtml(uData.ketones || '')}</td></tr>
-                              <tr><td>Nitrite</td><td>${escapeHtml(uData.nitrite || '')}</td><td>Leukocyte</td><td>${escapeHtml(uData.leukocyte || '')}</td></tr>
-                              <tr><td>Blood</td><td colspan="3">${escapeHtml(uData.blood || '')}</td></tr>
-                            </tbody></table>
-                          </div>
-                          <div>
-                            <h4>Microscopical Examination</h4>
-                            <table><tbody>
-                              <tr><td>Pus Cells</td><td>${escapeHtml(uData.pusCells || '')}</td><td>Red Cells</td><td>${escapeHtml(uData.redCells || '')}</td></tr>
-                              <tr><td>Epithelial Cell</td><td>${escapeHtml(uData.epithelialCell || '')}</td><td>Bacteria</td><td>${escapeHtml(uData.bacteria || '')}</td></tr>
-                              <tr><td>Crystals</td><td>${escapeHtml(uData.crystals || '')}</td><td>Amorphous</td><td>${escapeHtml(uData.amorphous || '')}</td></tr>
-                              <tr><td>Mucus</td><td>${escapeHtml(uData.mucus || '')}</td><td>Other</td><td>${escapeHtml(uData.other || '')}</td></tr>
-                            </tbody></table>
-                          </div>
-                        </div>
-                      `;
-                    } else {
-                      return `
-                        <table class="results-table">
-                          <thead>
-                            <tr>
-                              <th style="width: 30%;">Test Name</th>
-                              <th style="width: 20%;">Result</th>
-                              <th style="width: 15%;">Unit</th>
-                              <th style="width: 35%;">Normal Range</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td class="test-name">${escapeHtml(result.testName)}</td>
-                              <td class="test-result">${escapeHtml(result.result || '-')}</td>
-                              <td>${escapeHtml(result.unit || '-')}</td>
-                              <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      `;
-                    }
-                 }).join('')}
-               </div>
+                  <div>
+                    <h4>Chemical Examination</h4>
+                    <table>
+                      <tbody>
+                        <tr>
+                          <td>Glucose</td>
+                          <td>${escapeHtml(uData.glucose || 'Nil')}</td>
+                          <td>Protein</td>
+                          <td>${escapeHtml(uData.protein || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Bilirubin</td>
+                          <td>${escapeHtml(uData.bilirubin || 'Nil')}</td>
+                          <td>Ketones</td>
+                          <td>${escapeHtml(uData.ketones || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Nitrite</td>
+                          <td>${escapeHtml(uData.nitrite || 'Nil')}</td>
+                          <td>Leukocyte</td>
+                          <td>${escapeHtml(uData.leukocyte || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Blood</td>
+                          <td colspan="3">${escapeHtml(uData.blood || 'Nil')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
 
-               <!-- 4. الكتابة السفلية (من الإعدادات) - تظهر تحت الجدول في كل صفحة -->
-               ${bottomSections.map(section => `
-                 <div class="custom-section bottom" style="
-                   text-align: ${section.alignment};
-                   color: ${escapeHtml(section.textColor)};
-                   background-color: ${escapeHtml(section.backgroundColor)};
-                   font-size: ${section.fontSize || 16}px;
-                 ">
-                   ${escapeHtml(section.text)}
-                 </div>
-               `).join('')}
+                  <div>
+                    <h4>Microscopical Examination</h4>
+                    <table>
+                      <tbody>
+                        <tr>
+                          <td>Pus Cells</td>
+                          <td>${escapeHtml(uData.pusCells || 'Nil')}</td>
+                          <td>Red Cells</td>
+                          <td>${escapeHtml(uData.redCells || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Epithelial Cell</td>
+                          <td>${escapeHtml(uData.epithelialCell || 'Nil')}</td>
+                          <td>Bacteria</td>
+                          <td>${escapeHtml(uData.bacteria || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Crystals</td>
+                          <td>${escapeHtml(uData.crystals || 'Nil')}</td>
+                          <td>Amorphous</td>
+                          <td>${escapeHtml(uData.amorphous || 'Nil')}</td>
+                        </tr>
+                        <tr>
+                          <td>Mucus</td>
+                          <td>${escapeHtml(uData.mucus || 'Nil')}</td>
+                          <td>Other</td>
+                          <td>${escapeHtml(uData.other || 'Nil')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              `;
+            } else {
+              // Check if this is a long test (needs auto-scaling)
+              if (isLongTestType) {
+                return `
+                  <div class="long-test-container auto-scale">
+                    <table class="results-table" style="margin-bottom: 20px; page-break-inside: avoid;">
+                      <thead>
+                        <tr>
+                          <th>Test Name</th>
+                          <th>Result</th>
+                          <th>Unit</th>
+                          <th>Normal Range</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td class="test-name">${escapeHtml(result.testName)}</td>
+                          <td class="test-result">${escapeHtml(result.result || '-')}</td>
+                          <td>${escapeHtml(result.unit || '-')}</td>
+                          <td>${escapeHtml(result.normalRange || '-')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                `;
+              } else {
+                // Short test - normal rendering
+                return `
+                  <table class="results-table" style="margin-bottom: 20px; page-break-inside: avoid;">
+                    <thead>
+                      <tr>
+                        <th>Test Name</th>
+                        <th>Result</th>
+                        <th>Unit</th>
+                        <th>Normal Range</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td class="test-name">${escapeHtml(result.testName)}</td>
+                        <td class="test-result">${escapeHtml(result.result || '-')}</td>
+                        <td>${escapeHtml(result.unit || '-')}</td>
+                        <td>${escapeHtml(result.normalRange || '-')}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                `;
+              }
+            }
+          }).join('')}
+
+                ${bottomSections.map(section => `
+                  <div class="custom-section bottom" style="
+                    text-align: ${section.alignment};
+                    color: ${escapeHtml(section.textColor)};
+                    background-color: ${escapeHtml(section.backgroundColor)};
+                    font-size: ${section.fontSize || 16}px;
+                  ">
+                    ${escapeHtml(section.text)}
+                  </div>
+                `).join('')}
+              </div>
             </div>
           `).join('')}
         </body>
@@ -947,7 +1187,7 @@ export default function Results() {
                       );
                     }
                     
-                    // Standard test (Updated with Textarea for multi-line support)
+                    // Standard test
                     return (
                       <div
                         key={test.id}
@@ -985,13 +1225,12 @@ export default function Results() {
                           <Label htmlFor={`range-${test.id}`} className="text-xs text-muted-foreground">
                             Normal Range
                           </Label>
-                          <Textarea
+                          <Input
                             id={`range-${test.id}`}
                             placeholder="Range"
                             value={test.normalRange || ""}
                             onChange={(e) => updateResult(test.id, "normalRange", e.target.value)}
                             data-testid={`input-range-${index}`}
-                            className="min-h-[60px] resize-y"
                           />
                         </div>
                       </div>
@@ -1000,6 +1239,12 @@ export default function Results() {
                 </div>
               </CardContent>
             </Card>
+          )}
+
+          {!selectedVisit && (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">Select a patient to enter test results</p>
+            </div>
           )}
         </div>
 

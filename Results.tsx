@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea"; // 1. تمت إضافة هذا السطر فقط
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Save, Printer, FileDown, Search, Calendar, ArrowLeft, Settings, Trash2, Plus, X } from "lucide-react";
@@ -98,7 +99,6 @@ export default function Results() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/patients"] });
       queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
-      setEditDialogOpen(false);
       toast({
         title: "Changes Saved",
         description: "Patient information has been updated successfully",
@@ -150,6 +150,16 @@ export default function Results() {
       });
     },
   });
+
+  // 2. تمت إضافة هذه الأوامر هنا لحل مشكلة الحذف (بدون لمس الباقي)
+  const deleteTestResultMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/test-results/${id}`, {}),
+  });
+
+  const createTestResultMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/test-results", data),
+  });
+  // ------------------------------------------------
 
   const batchUpdateMutation = useMutation({
     mutationFn: (updates: Array<{ id: string; data: Partial<TestResult> }>) =>
@@ -229,37 +239,83 @@ export default function Results() {
     
     try {
       // Update patient data
-      const updatedPatientData: Partial<Patient> = {
-        name: patientFormData.name,
-        age: patientFormData.age ? parseInt(patientFormData.age) : undefined,
-        gender: patientFormData.gender || undefined,
-        phone: patientFormData.phone || undefined,
-        source: patientFormData.source || undefined,
-      };
-
       await updatePatientMutation.mutateAsync({
         id: editingPatient.id,
-        patient: updatedPatientData,
+        patient: {
+          name: patientFormData.name,
+          age: patientFormData.age ? parseInt(patientFormData.age) : undefined,
+          gender: patientFormData.gender || undefined,
+          phone: patientFormData.phone || undefined,
+          source: patientFormData.source || undefined,
+        },
       });
+
+      // --- 3. بداية تعديل الحذف (تمت الإضافة هنا فقط) ---
+      const oldTestIds = editingVisit.testIds || [];
+      const newTestIds = visitFormData.testIds;
+      const addedTestIds = newTestIds.filter(id => !oldTestIds.includes(id));
+      const removedTestIds = oldTestIds.filter(id => !newTestIds.includes(id));
+
+      // حذف الفحوصات
+      if (removedTestIds.length > 0) {
+        const resultsToDelete = results.filter(r => removedTestIds.includes(r.testId));
+        for (const res of resultsToDelete) {
+           await deleteTestResultMutation.mutateAsync(res.id);
+        }
+        setResults(prev => prev.filter(r => !removedTestIds.includes(r.testId)));
+      }
+
+      // إضافة الفحوصات
+      for (const testId of addedTestIds) {
+        const testDef = allTests?.find(t => t.id === testId);
+        if (testDef) {
+           const resultData: any = {
+              visitId: editingVisit.id,
+              testId: testDef.id,
+              testName: testDef.name,
+              price: testDef.price,
+              unit: testDef.unit,
+              normalRange: testDef.normalRange,
+              testType: testDef.testType || "standard",
+           };
+           if (testDef.testType === "urine") {
+              resultData.urineData = {
+                colour: "Amber Yellow", aspect: "Clear", reaction: "Acidic",
+                specificGravity: "1015-1025", glucose: "Nil", protein: "Nil",
+                bilirubin: "Nil", ketones: "Nil", nitrite: "Nil", leukocyte: "Nil",
+                blood: "Nil", pusCells: "Nil", redCells: "Nil", epithelialCell: "Nil",
+                bacteria: "Nil", crystals: "Nil", amorphous: "Nil", mucus: "Nil", other: "Nil"
+              };
+           }
+           await createTestResultMutation.mutateAsync(resultData);
+        }
+      }
+      // --- نهاية تعديل الحذف ---
 
       // Update visit data (tests and price)
-      const updatedVisitData: Partial<Visit> = {
-        testIds: visitFormData.testIds,
-        totalCost: visitFormData.totalCost,
-      };
-
       await updateVisitMutation.mutateAsync({
         id: editingVisit.id,
-        visit: updatedVisitData,
+        visit: {
+          testIds: visitFormData.testIds,
+          totalCost: visitFormData.totalCost,
+        },
       });
 
+      // تحديث القوائم
+      await queryClient.invalidateQueries({ queryKey: ["/api/test-results"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/visits"] });
+      
       setEditDialogOpen(false);
       toast({
         title: "Changes Saved",
         description: "Patient and visit information have been updated successfully",
       });
     } catch (error) {
-      // Error handling is in the mutations
+      toast({
+        title: "Error",
+        description: "Failed to save patient information",
+        variant: "destructive",
+      });
     }
   };
 
@@ -397,6 +453,7 @@ export default function Results() {
     }
 
     // Generate patient info HTML (reused on each page)
+    // 4. تمت إضافة التاريخ هنا في الطباعة
     const patientInfoHTML = `
       <div class="patient-info">
         <h2>Patient Information</h2>
@@ -419,6 +476,10 @@ export default function Results() {
             <span class="info-value">${escapeHtml(patientData.gender)}</span>
           </div>
           ` : ''}
+          <div class="info-item">
+            <span class="info-label">Date:</span>
+            <span class="info-value" style="font-size: 12px; font-family: monospace;">${selectedVisitData.visitDate}</span>
+          </div>
           ${patientData?.phone ? `
           <div class="info-item">
             <span class="info-label">Phone:</span>
@@ -457,6 +518,9 @@ export default function Results() {
             .page-content {
               page-break-inside: avoid;
             }
+
+            /* 5. تمت إضافة هذا السطر لدعم الأسطر المتعددة في الطباعة */
+            .multiline-text { white-space: pre-wrap; }
             
             /* Custom sections styling */
             .custom-section {
@@ -526,6 +590,7 @@ export default function Results() {
               padding: 10px;
               border: 1px solid #d1d5db;
               font-size: 14px;
+              vertical-align: top; /* تحسين لمحاذاة النص */
             }
             .results-table tr:nth-child(even) {
               background: #f9fafb;
@@ -747,7 +812,7 @@ export default function Results() {
                           <td class="test-name">${escapeHtml(result.testName)}</td>
                           <td class="test-result">${escapeHtml(result.result || '-')}</td>
                           <td>${escapeHtml(result.unit || '-')}</td>
-                          <td>${escapeHtml(result.normalRange || '-')}</td>
+                          <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td> <!-- 6. تعديل هنا -->
                         </tr>
                       </tbody>
                     </table>
@@ -770,7 +835,7 @@ export default function Results() {
                         <td class="test-name">${escapeHtml(result.testName)}</td>
                         <td class="test-result">${escapeHtml(result.result || '-')}</td>
                         <td>${escapeHtml(result.unit || '-')}</td>
-                        <td>${escapeHtml(result.normalRange || '-')}</td>
+                        <td class="multiline-text">${escapeHtml(result.normalRange || '-')}</td> <!-- 7. تعديل هنا -->
                       </tr>
                     </tbody>
                   </table>
@@ -1187,7 +1252,7 @@ export default function Results() {
                       );
                     }
                     
-                    // Standard test
+                    // Standard test (8. هذا هو التعديل: استخدام Textarea بدلاً من Input)
                     return (
                       <div
                         key={test.id}
@@ -1225,12 +1290,13 @@ export default function Results() {
                           <Label htmlFor={`range-${test.id}`} className="text-xs text-muted-foreground">
                             Normal Range
                           </Label>
-                          <Input
+                          <Textarea
                             id={`range-${test.id}`}
                             placeholder="Range"
                             value={test.normalRange || ""}
                             onChange={(e) => updateResult(test.id, "normalRange", e.target.value)}
                             data-testid={`input-range-${index}`}
+                            className="min-h-[60px] resize-y"
                           />
                         </div>
                       </div>
